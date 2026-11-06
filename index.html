@@ -15,13 +15,15 @@
   <!-- 손 위치를 알려주는 작은 표시 -->
   <div id="hand-dot" class="hand-dot"></div>
 
+  <!-- 상단 중앙 로고 (첫 화면·체험 화면 공통, 촬영한 사진에는 들어가지 않음) -->
+  <img id="top-logo" class="top-logo" src="Logo.svg" alt="coteve" />
+
   <!-- 시작(홈) 화면 -->
   <section id="intro" class="overlay">
     <div class="intro-card">
-      <img class="logo" src="Logo.svg" alt="coteve" />
-      <h1>Unveil Your Teeth.<br />Reveal Your Smile.</h1>
-      <p class="desc">카메라를 켜고, 손날로 화면을 옆으로 쓸어<br />베일을 걷어내 보세요.</p>
-      <button id="start-btn" class="btn primary">체험 시작하기</button>
+      <h1>Unveil the Glass Smile</h1>
+      <p class="desc">카메라를 켜고, 손으로 화면을 쓸어<br />베일을 걷어내 보세요.</p>
+      <button id="start-btn" class="btn primary">Enable Camera</button>
       <p class="fine">카메라 영상은 이 기기 안에서만 처리되며, 저장되거나 전송되지 않아요.</p>
     </div>
   </section>
@@ -47,8 +49,6 @@
     <div id="status" class="status"><span class="dot"></span><span id="status-text">손을 화면에 보여 주세요</span></div>
     <button id="home-btn" class="btn ghost small home-btn">처음으로</button>
     <p id="hint" class="hint">손을 펴고, 손날로 화면을 좌우로 쓸어 주세요</p>
-    <img class="hud-logo" src="Logo.svg" alt="coteve" />
-    <p id="done-copy" class="done-copy">Reveal Your Smile.</p>
     <div class="bottom-bar">
       <button id="reset-btn" class="btn ghost">다시 체험하기</button>
       <button id="shoot-btn" class="btn primary">촬영하기</button>

@@ -44,14 +44,18 @@ html, body {
   z-index: 10;
 }
 
-.intro-card { max-width: 560px; }
+.intro-card { max-width: 780px; }
 
-.logo {
-  display: block;
-  width: 168px;
+/* 상단 중앙 로고 (첫 화면·체험 화면 공통) */
+.top-logo {
+  position: fixed;
+  left: 50%; top: 26px;
+  transform: translateX(-50%);
+  width: 104px;
   height: auto;
-  margin: 0 auto 26px;
-  filter: drop-shadow(0 1px 3px var(--accent-shadow)) drop-shadow(0 2px 20px var(--accent-shadow));
+  z-index: 25;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px var(--accent-shadow)) drop-shadow(0 2px 14px var(--accent-shadow));
 }
 
 #intro .desc, #intro .fine { color: var(--accent-deep); }
@@ -147,29 +151,7 @@ h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
 @keyframes breathe { 50% { opacity: 0.65; } }
 .hint.gone { opacity: 0 !important; animation: none; }
 
-.hud-logo {
-  position: absolute;
-  left: 50%; top: 26px;
-  transform: translateX(-50%);
-  width: 104px;
-  height: auto;
-  pointer-events: none;
-  filter: drop-shadow(0 1px 3px var(--accent-shadow)) drop-shadow(0 2px 14px var(--accent-shadow));
-}
 
-.done-copy {
-  position: absolute;
-  left: 0; right: 0; top: calc(26px + 40px);
-  margin: 0;
-  text-align: center;
-  font-size: clamp(26px, 3.6vw, 48px);
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  opacity: 0;
-  transform: translateY(8px);
-  transition: opacity 0.8s ease, transform 0.8s ease;
-}
-.done-copy.show { opacity: 1; transform: none; }
 
 /* 하단 버튼 줄 (다시 체험하기 / 촬영하기) */
 .bottom-bar {

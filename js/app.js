@@ -12,7 +12,7 @@ const video = $('cam');
 const ui = {
   intro: $('intro'), loading: $('loading'), error: $('error'), errorMsg: $('error-msg'),
   hud: $('hud'), status: $('status'), statusText: $('status-text'),
-  hint: $('hint'), done: $('done-copy'), dot: $('hand-dot'),
+  hint: $('hint'), dot: $('hand-dot'),
   sizeRow: $('size-row'), size: $('size'),
   countdown: $('countdown'), flash: $('flash'),
   shot: $('shot'), shotImg: $('shot-img'), shareBtn: $('share-btn'),
@@ -23,7 +23,6 @@ const ui = {
 const params = new URLSearchParams(location.search);
 const TEST = params.has('test');
 const MOUSE = TEST || params.has('mouse');
-const DONE_RATIO = 0.6; // 화면의 이만큼 닦이면 "Reveal Your Smile." 문구 표시
 const FOLLOW = 12;      // 붓이 손을 따라가는 빠르기 (클수록 즉각, 작을수록 부드럽게 미끄러짐)
 const FINGER_SIZE = 0.2; // 손가락으로 닦을 때 붓 크기 (손바닥 붓 대비 비율)
 
@@ -143,7 +142,6 @@ function resetExperience() {
   lives = [];
   renderer?.clearWipes();
   ui.hint.classList.remove('gone');
-  ui.done.classList.remove('show');
 }
 
 // ---------- 닦기 → 손을 부드럽게 따라가는 둥근 붓 ----------
@@ -187,7 +185,6 @@ function updateBrush(dt) {
 }
 
 // ---------- 매 프레임 ----------
-let lastCoverageCheck = 0;
 let prevT = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
@@ -212,13 +209,6 @@ function frame(now) {
 
   renderer.render({ mirror });
 
-  // 3) 가끔 닦인 비율 확인
-  if (running && wipe.started && now - lastCoverageCheck > 500) {
-    lastCoverageCheck = now;
-    const cov = renderer.measureCoverage();
-    if (cov > DONE_RATIO) ui.done.classList.add('show');
-    else if (cov < DONE_RATIO * 0.7) ui.done.classList.remove('show'); // 다시 덮이면 문구도 사라짐
-  }
 }
 requestAnimationFrame(frame);
 
