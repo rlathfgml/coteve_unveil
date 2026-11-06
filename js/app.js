@@ -4,7 +4,6 @@
 import { VeilRenderer, hexToRgb } from './veil-renderer.js';
 import { createHandTracker, handsToScreen } from './hand-tracker.js';
 import { WipeController } from './wipe-controller.js';
-import { keyPoints, arcFromKeys } from './arc.js';
 import * as cap from './capture.js';
 
 const $ = (id) => document.getElementById(id);
@@ -25,7 +24,7 @@ const params = new URLSearchParams(location.search);
 const TEST = params.has('test');
 const MOUSE = TEST || params.has('mouse');
 const DONE_RATIO = 0.6; // 화면의 이만큼 닦이면 "Reveal Your Smile." 문구 표시
-const FOLLOW = 16;      // 호의 끝이 손을 따라가는 빠르기 (클수록 즉각, 작을수록 부드럽게 미끄러짐)
+const FOLLOW = 12;      // 붓이 손을 따라가는 빠르기 (클수록 즉각, 작을수록 부드럽게 미끄러짐)
 
 let renderer;
 try {
@@ -146,38 +145,39 @@ function resetExperience() {
   ui.done.classList.remove('show');
 }
 
-// ---------- 닦기 → 부드럽게 움직이는 호 ----------
+// ---------- 닦기 → 손을 부드럽게 따라가는 둥근 붓 ----------
 // 손 위치는 1초에 30번 정도만 들어와서 그대로 그리면 뚝뚝 끊겨 보여요.
-// 그래서 화면에 그리는 호의 끝점은 실제 손 위치를 매 프레임 조금씩 따라가게 해요.
-let lives = []; // { stroke, m, b, h, settling }
-const approach = (p, q, k) => { p.x += (q.x - p.x) * k; p.y += (q.y - p.y) * k; };
+// 그래서 붓은 매 프레임(1초에 60번) 손 위치를 향해 미끄러지듯 따라가며, 지나간 길(호)을 칠해요.
+// 한 번 칠해진 곳은 모양이 바뀌지 않아서 떨림이 없어요.
+let lives = []; // { stroke, p, r, settling, age }
 
-function updateArcs(dt) {
-  const W = canvas.width, H = canvas.height, half = renderer.bandHalf * H;
+function updateBrush(dt) {
+  const W = canvas.width, H = canvas.height, R = renderer.bandHalf * H;
   for (const s of wipe.activeStrokes) {
-    if (!lives.some((l) => l.stroke === s)) lives.push({ stroke: s, m: null, b: null, h: half * 0.45 });
+    if (!lives.some((l) => l.stroke === s)) {
+      const p0 = s.points[0];
+      lives.push({ stroke: s, p: { x: p0.x * W, y: p0.y * H }, r: R * 0.5, age: 0 });
+    }
   }
   for (const s of wipe.takeFinished()) {
     const l = lives.find((x) => x.stroke === s);
-    if (l) l.settling = true; // 손을 멈춰도 호가 손 위치까지 마저 미끄러진 뒤 고정
+    if (l) l.settling = true; // 손을 멈춰도 붓이 손 위치까지 마저 미끄러진 뒤 멈춤
   }
   const k = 1 - Math.exp(-dt * FOLLOW);
-  const live = [], commit = [];
+  const segs = [];
   for (const l of lives) {
-    const kp = keyPoints(l.stroke, W, H);
-    if (!kp) { if (l.settling) l.dead = true; continue; }
-    if (!l.b) { l.m = { ...kp.a }; l.b = { ...kp.a }; } // 시작점에서부터 자라나기
-    approach(l.m, kp.m, k);
-    approach(l.b, kp.b, k);
-    l.h += (half - l.h) * (1 - Math.exp(-dt * 9)); // 두께도 부드럽게 커짐
-    const arc = arcFromKeys(kp.a, l.m, l.b, W, H, l.h, l.stroke.width);
-    const settled = Math.hypot(l.b.x - kp.b.x, l.b.y - kp.b.y) < 1.5
-      && Math.hypot(l.m.x - kp.m.x, l.m.y - kp.m.y) < 1.5 && Math.abs(l.h - half) < 1;
-    if (l.settling && settled) { commit.push(arc); l.dead = true; } else live.push(arc);
+    const pts = l.stroke.points, last = pts[pts.length - 1];
+    const tx = last.x * W, ty = last.y * H;
+    const prev = { ...l.p };
+    l.p.x += (tx - l.p.x) * k;
+    l.p.y += (ty - l.p.y) * k;
+    l.r += (R - l.r) * (1 - Math.exp(-dt * 8)); // 붓 크기도 부드럽게 커짐
+    l.age += dt;
+    segs.push({ ax: prev.x, ay: prev.y, bx: l.p.x, by: l.p.y, r: l.r });
+    if (l.settling && (Math.hypot(tx - l.p.x, ty - l.p.y) < 1 || l.age > 8)) l.dead = true;
   }
   lives = lives.filter((l) => !l.dead);
-  if (commit.length) renderer.commitArcs(commit);
-  return live;
+  renderer.paint(segs);
 }
 
 // ---------- 매 프레임 ----------
@@ -198,13 +198,13 @@ function frame(now) {
     updateHandUi(hands);
   }
 
-  // 2) 손이 지나간 길 → 부드럽게 따라가는 호 + 시간이 지나면 다시 덮이기
-  const live = updateArcs(dt);
-  if (running) renderer.decay(dt);
+  // 2) 붓으로 칠하기 + 시간이 지나면 흐려지며 다시 덮이기
+  updateBrush(dt);
+  if (running) renderer.evolve(dt);
 
   if (wipe.started) ui.hint.classList.add('gone');
 
-  renderer.render({ liveArcs: live, mirror });
+  renderer.render({ mirror });
 
   // 3) 가끔 닦인 비율 확인
   if (running && wipe.started && now - lastCoverageCheck > 500) {

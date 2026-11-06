@@ -7,10 +7,9 @@
 //  3) 컬러는 베일 조각의 '테두리 안쪽'에만 짙게 맺힌다 (Inner Glow)
 //  4) 닦인 영역 안쪽은 색·블러 없이 완전히 선명
 //
-// 닦이는 모양 = 손이 지나간 길을 따라 그린 '호 모양 띠'
-//  - 닦을 때마다 새 호가 더해지고(누적)
-//  - 시간이 지나면 닦인 곳 가장자리부터 베일이 천천히 다시 차오름 (재응결)
-//  - 각 호까지의 '거리'를 기억 텍스처에 저장 → 경계선은 또렷하고, 그 바깥쪽 베일 테두리에 컬러 글로우
+// 닦기 = 손을 부드럽게 따라가는 둥근 붓이 지나간 길(호)을 칠해 '선명도 지도'에 기록
+//  - 한 번 칠해진 모양은 다시 바뀌지 않음 (끊김/떨림 없음)
+//  - 잠시(holdTime) 뒤에는 그 영역이 잉크 번지듯 흐려지며 퍼지고, 베일이 다시 차오름
 // =============================================================
 
 // 디자인 수치는 여기서 쉽게 조절할 수 있어요.
@@ -18,19 +17,21 @@ export const LOOK = {
   washMix: 0.72,         // 베일 가운데 옅은 색 = 선택 컬러를 흰색과 섞는 비율 (클수록 옅음)
   washAmount: 0.26,      // 옅은 색이 흐린 영상을 덮는 정도 (0~1)
   glowAmount: 0.72,      // Inner Glow 최대 진하기 (0~1)
+  glowGain: 2.2,         // 닦인 영역 주변 글로우 세기
   veilOpacity: 0.84,     // 베일 전체 불투명도 (낮을수록 뒤의 카메라 화면이 더 비침)
-  glowWidthWindow: 0.075,// 닦인 영역 경계에서 베일 쪽으로 번지는 폭 (화면 높이 비율)
   glowWidthFrame: 0.11,  // 화면 테두리에서 안쪽으로 번지는 폭 (화면 높이 비율)
-  edgeSoftness: 0.003,   // 경계선 부드러움 (작을수록 또렷)
-  blurPasses: 3,         // 블러 반복 횟수 (클수록 더 흐림)
-  blurSpread: 2.2,       // 블러 퍼짐 정도
+  edgePx: 1.5,           // 막 닦인 경계선의 부드러움 (픽셀, 작을수록 또렷)
+  blurPasses: 3,         // 영상 블러 반복 횟수 (클수록 더 흐림)
+  blurSpread: 2.2,       // 영상 블러 퍼짐 정도
   blurWidth: 200,        // 블러용 축소 해상도(가로 픽셀)
-  cornerRadius: 0.035,   // 호 띠 양 끝 모서리 둥글기 (화면 높이 비율)
-  maskScale: 0.5,        // 닦인 영역 기억 텍스처 해상도 (화면 대비)
+  glowBlurWidth: 160,    // 글로우 계산용 축소 해상도
+  glowSpread: 1.6,       // 글로우 번짐 폭
+  maskScale: 0.5,        // 선명도 지도 해상도 (화면 대비)
 
-  // ---- 다시 덮이기 (재응결) ----
-  refogDelay: 4,         // 닦인 뒤 선명하게 유지되는 시간 (초)
-  refogSpeed: 0.035,     // 그 뒤 베일이 가장자리부터 차오르는 속도 (초당 화면 높이 비율)
+  // ---- 다시 덮이기 (흐려지며 퍼짐) ----
+  holdTime: 1.2,         // 닦인 뒤 선명하게 유지되는 시간 (초)
+  spreadPx: 5,           // 흐려지며 퍼지는 정도 (클수록 더 넓게 번짐)
+  fadeTime: 2.4,         // 퍼지기 시작한 뒤 베일이 완전히 다시 덮이기까지 걸리는 시간 (초)
 };
 
 const VERT = `#version 300 es
@@ -74,63 +75,72 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
-// 호 모양 띠 하나를 '거리 값'으로 그리기 (여러 개는 MAX 블렌딩으로 합쳐짐)
-//  값 v = 0.5 - 거리/(2*범위)  → 띠 안쪽 > 0.5, 경계 = 0.5, 멀어질수록 0
-const STROKE_FRAG = `#version 300 es
+// 붓 한 번(선분 → 둥근 띠)을 선명도 지도에 칠하기 (MAX 블렌딩으로 합쳐짐)
+//  R = 선명도 (1 = 완전히 닦임), G = 유지 타이머 (1에서 시작해 줄어듦)
+const BRUSH_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 o;
-uniform vec2 uRes;       // 화면 픽셀 크기
-uniform vec2 uC;         // 원 중심 (픽셀, 위쪽이 0)
-uniform float uRho;      // 원 반지름
-uniform float uMid;      // 호 가운데 각도
-uniform float uHalfSpan; // 호 각도 범위의 절반
-uniform float uHalf;     // 띠 두께의 절반
-uniform float uCorner;
-uniform float uRange;
-const float PI = 3.14159265;
+uniform vec2 uRes;      // 화면 픽셀 크기
+uniform vec2 uA;        // 선분 시작 (픽셀, 위쪽이 0)
+uniform vec2 uB;        // 선분 끝
+uniform float uR;       // 붓 반지름
+uniform float uEdge;
+uniform float uHalo;
 void main() {
   vec2 p = vec2(vUv.x * uRes.x, (1.0 - vUv.y) * uRes.y);
-  vec2 v = p - uC;
-  float r = length(v);
-  float rel = atan(v.y, v.x) - uMid;
-  rel = mod(rel + PI, 2.0 * PI) - PI;
-  float da = (abs(rel) - uHalfSpan) * max(r, 1.0);
-  float dr = abs(r - uRho) - uHalf;
-  vec2 q = vec2(da, dr) + uCorner;
-  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uCorner;
-  float val = clamp(0.5 - d / (2.0 * uRange), 0.0, 1.0);
-  // G = 유지 타이머 (닦인 곳과 그 주변은 1로 채움 → 시간이 지나며 줄어듦)
-  o = vec4(val, step(0.35, val), 0.0, 1.0);
+  vec2 pa = p - uA, ba = uB - uA;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+  float d = length(pa - ba * h) - uR;
+  float c = 1.0 - smoothstep(-uEdge, uEdge, d);
+  o = vec4(c, step(d, uHalo), 0.0, 1.0);
 }`;
 
-// 시간이 지나면: 유지 타이머(G)를 줄이고, 타이머가 끝난 곳은 거리 값(R)을 줄여 베일이 다시 차오르게
-const DECAY_FRAG = `#version 300 es
+// 시간 흐름: 유지 시간이 끝난 곳은 주변과 섞이며(번짐) 선명도가 줄어듦(다시 덮임)
+const EVOLVE_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uMask;
+uniform vec2 uTexel;
 uniform float uDt;
 uniform float uHold;
-uniform float uShrink;
+uniform float uSpread;
+uniform float uFade;
 void main() {
   vec4 m = texture(uMask, vUv);
   float g = max(m.g - uDt / uHold, 0.0);
-  float r = m.g > 0.0 ? m.r : max(m.r - uShrink * uDt, 0.0);
-  o = vec4(r, g, 0.0, 1.0);
+  float c = m.r;
+  if (m.g <= 0.0) {
+    vec2 s = uTexel * uSpread;
+    float avg = (
+      texture(uMask, vUv + vec2( s.x, 0.0)).r + texture(uMask, vUv + vec2(-s.x, 0.0)).r +
+      texture(uMask, vUv + vec2(0.0,  s.y)).r + texture(uMask, vUv + vec2(0.0, -s.y)).r +
+      texture(uMask, vUv + s * 0.7071).r + texture(uMask, vUv - s * 0.7071).r +
+      texture(uMask, vUv + vec2(s.x, -s.y) * 0.7071).r + texture(uMask, vUv + vec2(-s.x, s.y) * 0.7071).r
+    ) / 8.0;
+    float k = clamp(uDt * 30.0, 0.0, 1.0) * 0.5;
+    c = mix(c, avg, k);                 // 번짐
+    c = max(c - uDt / uFade, 0.0);      // 다시 덮임
+  }
+  o = vec4(c, g, 0.0, 1.0);
 }`;
 
-// 닦인 비율 계산용 (작은 텍스처로 줄이기)
+// 선명도 지도 → 글로우 계산용 작은 텍스처로 복사
+const COPY_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uMask;
+void main() { o = vec4(vec3(texture(uMask, vUv).r), 1.0); }`;
+
+// 닦인 비율 계산용
 const COVER_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uMask;
-uniform sampler2D uLive;
-void main() {
-  float v = max(texture(uMask, vUv).r, texture(uLive, vUv).r);
-  o = vec4(step(0.5, v), 0.0, 0.0, 1.0);
-}`;
+void main() { o = vec4(step(0.5, texture(uMask, vUv).r), 0.0, 0.0, 1.0); }`;
 
 // 최종 합성: 선명한 영상 / 베일 / Inner Glow
 const COMP_FRAG = `#version 300 es
@@ -139,19 +149,17 @@ in vec2 vUv;
 out vec4 o;
 uniform sampler2D uSrc;
 uniform sampler2D uBlur;
-uniform sampler2D uMask;   // 끝난 닦기들 (영구)
-uniform sampler2D uLive;   // 진행 중인 닦기
+uniform sampler2D uMask;      // 선명도 지도
+uniform sampler2D uMaskBlur;  // 흐리게 만든 선명도 지도 (글로우용)
 uniform vec2 uRes;
 uniform vec2 uCover;
 uniform float uMirror;
-uniform float uRange;
 uniform vec3 uWash;
 uniform float uWashAmt;
 uniform vec3 uGlow;
 uniform float uGlowAmt;
-uniform float uGlowWin;
+uniform float uGlowGain;
 uniform float uGlowFrame;
-uniform float uEdge;
 uniform float uOpacity;
 
 vec2 srcUv(vec2 s) {
@@ -167,16 +175,12 @@ void main() {
   vec3 sharp = texture(uSrc, srcUv(vUv)).rgb;
   vec3 blur  = texture(uBlur, vUv).rgb;
 
-  // 닦인 영역까지의 거리(픽셀). 음수 = 닦인 영역 안(선명), 양수 = 베일
-  float v = max(texture(uMask, vUv).r, texture(uLive, vUv).r);
-  float d = (0.5 - v) * 2.0 * uRange;
+  float c = texture(uMask, vUv).r;            // 1 = 닦임(선명)
+  float cb = texture(uMaskBlur, vUv).r;       // 주변에 닦인 곳이 얼마나 있나
+  float veilMask = 1.0 - c;
 
-  // 베일 마스크: 0 = 선명, 1 = 베일
-  float edge = max(1.2, H * uEdge);
-  float veilMask = smoothstep(-edge, edge, d);
-
-  // Inner Glow: 베일 조각의 테두리 안쪽에서 진하고, 안쪽으로 갈수록 사라짐
-  float gWin = exp(-max(d, 0.0) / (H * uGlowWin)) * step(v, 0.999) * smoothstep(0.0, 0.02, v);
+  // Inner Glow: 닦인 영역과 맞닿은 베일 쪽에서 진하고, 멀어질수록 사라짐
+  float gWin = clamp(cb * uGlowGain, 0.0, 1.0) * veilMask;
   float fw = H * uGlowFrame;
   vec4 eg = exp(-vec4(p.x, uRes.x - p.x, p.y, uRes.y - p.y) / fw);
   float gFrame = 1.0 - (1.0 - eg.x) * (1.0 - eg.y) * (1.0 - eg.z) * (1.0 - eg.w);
@@ -232,25 +236,24 @@ export class VeilRenderer {
     const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error('이 브라우저는 WebGL2를 지원하지 않아요.');
     this.gl = gl;
-    // 거리 값을 정밀하게 저장할 수 있으면 16비트, 아니면 8비트
     this.floatMask = !!gl.getExtension('EXT_color_buffer_float');
     this.mapProg = program(gl, MAP_FRAG);
     this.blurProg = program(gl, BLUR_FRAG);
-    this.strokeProg = program(gl, STROKE_FRAG);
+    this.brushProg = program(gl, BRUSH_FRAG);
+    this.evolveProg = program(gl, EVOLVE_FRAG);
+    this.copyProg = program(gl, COPY_FRAG);
     this.coverProg = program(gl, COVER_FRAG);
-    this.decayProg = program(gl, DECAY_FRAG);
     this.compProg = program(gl, COMP_FRAG);
     this.vao = gl.createVertexArray();
     this.srcTex = makeTex(gl);
     this.clearSource();
     this.setColor('#FF80A0');
-    this.bandHalf = 0.2;  // 닦이는 띠 두께의 절반 (화면 높이 비율) — 크기 슬라이더로 바뀜
+    this.bandHalf = 0.2;  // 붓 반지름 (화면 높이 비율) — 크기 슬라이더로 바뀜
 
-    this.fbos = [this._makeFbo(), this._makeFbo()];
-    this.masks = [this._makeFbo(), this._makeFbo()]; // 끝난 닦기들 (번갈아 쓰기)
-    this.decayAcc = 0;
-    this.live = this._makeFbo();   // 진행 중인 닦기
-    this.tiny = this._makeFbo();   // 닦인 비율 계산용
+    this.fbos = [this._makeFbo(), this._makeFbo()];       // 영상 블러
+    this.gfbos = [this._makeFbo(), this._makeFbo()];      // 글로우 블러
+    this.masks = [this._makeFbo(), this._makeFbo()];      // 선명도 지도 (번갈아 쓰기)
+    this.tiny = this._makeFbo();                          // 닦인 비율 계산용
     this._sizeFbo(this.tiny, 48, 27, false);
     this.coverage = 0;
     this.resize();
@@ -293,73 +296,74 @@ export class VeilRenderer {
     if (this.canvas.width === w && this.canvas.height === h && this.fbos[0].w) return;
     this.canvas.width = w;
     this.canvas.height = h;
-    const bw = LOOK.blurWidth;
-    const bh = Math.max(2, Math.round(bw * h / w));
-    this.fbos.forEach((f) => this._sizeFbo(f, bw, bh, false));
+    const small = (bw) => [bw, Math.max(2, Math.round(bw * h / w))];
+    this.fbos.forEach((f) => this._sizeFbo(f, ...small(LOOK.blurWidth), false));
+    this.gfbos.forEach((f) => this._sizeFbo(f, ...small(LOOK.glowBlurWidth), this.floatMask));
     const mw = Math.round(w * LOOK.maskScale), mh = Math.round(h * LOOK.maskScale);
-    this.masks.forEach((m) => { this._sizeFbo(m, mw, mh, this.floatMask); this._clear(m); });
-    this._sizeFbo(this.live, mw, mh, this.floatMask); // 창 크기가 바뀌면 닦인 기록은 초기화
-    this._clear(this.live);
+    this.masks.forEach((m) => { this._sizeFbo(m, mw, mh, this.floatMask); this._clear(m); }); // 창 크기가 바뀌면 기록 초기화
   }
 
   /** 닦인 기록 모두 지우기 (다시 체험하기) */
   clearWipes() {
     this.masks.forEach((m) => this._clear(m));
-    this._clear(this.live);
     this.coverage = 0;
   }
 
-  get range() { return this.canvas.height * 0.3; }
   get mask() { return this.masks[0]; }
 
-  /** 시간이 흐름에 따라 닦인 곳이 다시 덮이게 함 */
-  decay(dt) {
-    // 8비트 기록일 때는 변화가 너무 작아 반영이 안 되므로 0.1초씩 모아서 처리
-    this.decayAcc += dt;
-    const step = this.floatMask ? this.decayAcc : (this.decayAcc >= 0.1 ? this.decayAcc : 0);
-    if (!step) return;
-    this.decayAcc = 0;
-    const gl = this.gl, d = this.decayProg;
-    const [src, dst] = this.masks;
+  /**
+   * 붓으로 칠하기
+   * @param segs [{ax, ay, bx, by, r}] 화면 픽셀 좌표 (위쪽이 0)
+   */
+  paint(segs) {
+    if (!segs.length) return;
+    const gl = this.gl, b = this.brushProg, m = this.mask;
+    const W = this.canvas.width, H = this.canvas.height;
+    const sx = m.w / W, sy = m.h / H;
     gl.bindVertexArray(this.vao);
-    this._pass(d, dst, dst.w, dst.h);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, src.tex);
-    gl.uniform1i(d.u.uMask, 0);
-    gl.uniform1f(d.u.uDt, step);
-    gl.uniform1f(d.u.uHold, LOOK.refogDelay);
-    gl.uniform1f(d.u.uShrink, (LOOK.refogSpeed * this.canvas.height) / (2 * this.range));
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    this.masks = [dst, src];
-  }
-
-  _drawArcs(target, arcs) {
-    if (!arcs.length) return;
-    const gl = this.gl, s = this.strokeProg;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);
-    gl.viewport(0, 0, target.w, target.h);
-    gl.useProgram(s.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, m.fb);
+    gl.viewport(0, 0, m.w, m.h);
+    gl.useProgram(b.p);
     gl.enable(gl.BLEND);
     gl.blendEquation(gl.MAX);
-    gl.uniform2f(s.u.uRes, this.canvas.width, this.canvas.height);
-    gl.uniform1f(s.u.uCorner, LOOK.cornerRadius * this.canvas.height);
-    gl.uniform1f(s.u.uRange, this.range);
-    for (const a of arcs) {
-      gl.uniform2f(s.u.uC, a.cx, a.cy);
-      gl.uniform1f(s.u.uRho, a.rho);
-      gl.uniform1f(s.u.uMid, a.mid);
-      gl.uniform1f(s.u.uHalfSpan, a.halfSpan);
-      gl.uniform1f(s.u.uHalf, a.half);
+    gl.enable(gl.SCISSOR_TEST);
+    const halo = H * 0.03;
+    gl.uniform2f(b.u.uRes, W, H);
+    gl.uniform1f(b.u.uEdge, LOOK.edgePx * (W / m.w));
+    gl.uniform1f(b.u.uHalo, halo);
+    for (const s of segs) {
+      // 붓이 닿는 범위만 계산 (빠르게)
+      const pad = s.r + halo + 4;
+      const x0 = Math.floor((Math.min(s.ax, s.bx) - pad) * sx), x1 = Math.ceil((Math.max(s.ax, s.bx) + pad) * sx);
+      const y0 = Math.floor((Math.min(s.ay, s.by) - pad) * sy), y1 = Math.ceil((Math.max(s.ay, s.by) + pad) * sy);
+      gl.scissor(x0, m.h - y1, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
+      gl.uniform2f(b.u.uA, s.ax, s.ay);
+      gl.uniform2f(b.u.uB, s.bx, s.by);
+      gl.uniform1f(b.u.uR, s.r);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+    gl.disable(gl.SCISSOR_TEST);
     gl.disable(gl.BLEND);
     gl.blendEquation(gl.FUNC_ADD);
   }
 
-  /** 끝난 닦기를 영구 기록 */
-  commitArcs(arcs) {
-    this.gl.bindVertexArray(this.vao);
-    this._drawArcs(this.mask, arcs);
+  /** 시간 흐름: 유지 시간이 지난 곳은 흐려지며 퍼지고 다시 덮임 */
+  evolve(dt) {
+    if (dt <= 0) return;
+    const gl = this.gl, e = this.evolveProg;
+    const [src, dst] = this.masks;
+    gl.bindVertexArray(this.vao);
+    this._pass(e, dst, dst.w, dst.h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.uniform1i(e.u.uMask, 0);
+    gl.uniform2f(e.u.uTexel, 1 / src.w, 1 / src.h);
+    gl.uniform1f(e.u.uDt, dt);
+    gl.uniform1f(e.u.uHold, LOOK.holdTime);
+    gl.uniform1f(e.u.uSpread, LOOK.spreadPx);
+    gl.uniform1f(e.u.uFade, LOOK.fadeTime);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.masks = [dst, src];
   }
 
   // 영상(video) 또는 이미지(img)를 원본으로 지정
@@ -401,6 +405,22 @@ export class VeilRenderer {
     gl.useProgram(prog.p);
   }
 
+  _blur(pair, passes, spread) {
+    const gl = this.gl, [A, B] = pair;
+    for (let i = 0; i < passes; i++) {
+      const s = spread * (1 + i * 0.5);
+      this._pass(this.blurProg, B, B.w, B.h);
+      gl.bindTexture(gl.TEXTURE_2D, A.tex);
+      gl.uniform1i(this.blurProg.u.uTex, 0);
+      gl.uniform2f(this.blurProg.u.uStep, s / A.w, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      this._pass(this.blurProg, A, A.w, A.h);
+      gl.bindTexture(gl.TEXTURE_2D, B.tex);
+      gl.uniform2f(this.blurProg.u.uStep, 0, s / B.h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+  }
+
   /** 닦인 비율(0~1) 다시 계산 — 가끔만 호출 */
   measureCoverage() {
     const gl = this.gl, t = this.tiny;
@@ -409,11 +429,7 @@ export class VeilRenderer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.mask.tex);
     gl.uniform1i(this.coverProg.u.uMask, 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.live.tex);
-    gl.uniform1i(this.coverProg.u.uLive, 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.activeTexture(gl.TEXTURE0);
     const px = new Uint8Array(t.w * t.h * 4);
     gl.readPixels(0, 0, t.w, t.h, gl.RGBA, gl.UNSIGNED_BYTE, px);
     let n = 0;
@@ -422,46 +438,33 @@ export class VeilRenderer {
     return this.coverage;
   }
 
-  /**
-   * @param {{liveArcs:Array, mirror:boolean}} s  liveArcs: 진행 중인 닦기의 호 목록
-   */
+  /** @param {{mirror:boolean}} s */
   render(s) {
     const gl = this.gl;
     this.resize();
     this._uploadSource();
     gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0);
     const cover = this.coverFactor();
     const mirror = s.mirror ? 1 : 0;
-    const [A, B] = this.fbos;
+    const [A] = this.fbos, [GA] = this.gfbos;
     const W = this.canvas.width, H = this.canvas.height;
 
-    // 0) 진행 중인 닦기 다시 그리기
-    this._clear(this.live);
-    this._drawArcs(this.live, s.liveArcs || []);
-
-    // 1) 원본 → 작은 텍스처
+    // 1) 원본 → 작은 텍스처 → 블러 (베일 속 흐린 영상)
     this._pass(this.mapProg, A, A.w, A.h);
-    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
     gl.uniform1i(this.mapProg.u.uSrc, 0);
     gl.uniform2f(this.mapProg.u.uCover, cover[0], cover[1]);
     gl.uniform1f(this.mapProg.u.uMirror, mirror);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this._blur(this.fbos, LOOK.blurPasses, LOOK.blurSpread);
 
-    // 2) 블러 반복 (가로 → 세로)
-    for (let i = 0; i < LOOK.blurPasses; i++) {
-      const spread = LOOK.blurSpread * (1 + i * 0.5);
-      this._pass(this.blurProg, B, B.w, B.h);
-      gl.bindTexture(gl.TEXTURE_2D, A.tex);
-      gl.uniform1i(this.blurProg.u.uTex, 0);
-      gl.uniform2f(this.blurProg.u.uStep, spread / A.w, 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-      this._pass(this.blurProg, A, A.w, A.h);
-      gl.bindTexture(gl.TEXTURE_2D, B.tex);
-      gl.uniform2f(this.blurProg.u.uStep, 0, spread / B.h);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
+    // 2) 선명도 지도 → 작은 텍스처 → 블러 (글로우)
+    this._pass(this.copyProg, GA, GA.w, GA.h);
+    gl.bindTexture(gl.TEXTURE_2D, this.mask.tex);
+    gl.uniform1i(this.copyProg.u.uMask, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this._blur(this.gfbos, 2, LOOK.glowSpread);
 
     // 3) 최종 합성
     const c = this.compProg;
@@ -474,18 +477,16 @@ export class VeilRenderer {
     bind(0, this.srcTex, 'uSrc');
     bind(1, A.tex, 'uBlur');
     bind(2, this.mask.tex, 'uMask');
-    bind(3, this.live.tex, 'uLive');
+    bind(3, GA.tex, 'uMaskBlur');
     gl.uniform2f(c.u.uRes, W, H);
     gl.uniform2f(c.u.uCover, cover[0], cover[1]);
     gl.uniform1f(c.u.uMirror, mirror);
-    gl.uniform1f(c.u.uRange, this.range);
     gl.uniform3fv(c.u.uWash, this.washColor);
     gl.uniform1f(c.u.uWashAmt, LOOK.washAmount);
     gl.uniform3fv(c.u.uGlow, this.glowColor);
     gl.uniform1f(c.u.uGlowAmt, LOOK.glowAmount);
-    gl.uniform1f(c.u.uGlowWin, LOOK.glowWidthWindow);
+    gl.uniform1f(c.u.uGlowGain, LOOK.glowGain);
     gl.uniform1f(c.u.uGlowFrame, LOOK.glowWidthFrame);
-    gl.uniform1f(c.u.uEdge, LOOK.edgeSoftness);
     gl.uniform1f(c.u.uOpacity, LOOK.veilOpacity);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.activeTexture(gl.TEXTURE0);
