@@ -25,6 +25,7 @@ const TEST = params.has('test');
 const MOUSE = TEST || params.has('mouse');
 const DONE_RATIO = 0.6; // 화면의 이만큼 닦이면 "Reveal Your Smile." 문구 표시
 const FOLLOW = 12;      // 붓이 손을 따라가는 빠르기 (클수록 즉각, 작을수록 부드럽게 미끄러짐)
+const FINGER_SIZE = 0.2; // 손가락으로 닦을 때 붓 크기 (손바닥 붓 대비 비율)
 
 let renderer;
 try {
@@ -152,11 +153,15 @@ function resetExperience() {
 let lives = []; // { stroke, p, r, settling, age }
 
 function updateBrush(dt) {
-  const W = canvas.width, H = canvas.height, R = renderer.bandHalf * H;
+  const W = canvas.width, H = canvas.height;
+  // 손바닥 = 넓은 붓(크기 슬라이더), 손가락 = 얇은 붓
+  const radius = (mode) => mode === 'finger'
+    ? Math.max(H * 0.025, renderer.bandHalf * H * FINGER_SIZE)
+    : renderer.bandHalf * H;
   for (const s of wipe.activeStrokes) {
     if (!lives.some((l) => l.stroke === s)) {
       const p0 = s.points[0];
-      lives.push({ stroke: s, p: { x: p0.x * W, y: p0.y * H }, r: R * 0.5, age: 0 });
+      lives.push({ stroke: s, p: { x: p0.x * W, y: p0.y * H }, r: radius(s.mode) * 0.5, age: 0 });
     }
   }
   for (const s of wipe.takeFinished()) {
@@ -171,6 +176,7 @@ function updateBrush(dt) {
     const prev = { ...l.p };
     l.p.x += (tx - l.p.x) * k;
     l.p.y += (ty - l.p.y) * k;
+    const R = radius(l.stroke.mode);
     l.r += (R - l.r) * (1 - Math.exp(-dt * 8)); // 붓 크기도 부드럽게 커짐
     l.age += dt;
     segs.push({ ax: prev.x, ay: prev.y, bx: l.p.x, by: l.p.y, r: l.r });
@@ -220,10 +226,15 @@ function updateHandUi(hands) {
   const seen = hands.length > 0;
   ui.status.classList.toggle('on', seen);
   ui.statusText.textContent = seen ? '손 인식됨' : '손을 화면에 보여 주세요';
-  const h = hands[0];
+  // 표시 링: 손바닥이면 손바닥 중심, 손가락이면 검지 끝에 (손가락일 땐 작게)
+  const h = hands.find((x) => x.mode) || hands[0];
   ui.dot.classList.toggle('visible', seen);
   ui.dot.classList.toggle('wiping', wipe.wipingNow);
-  if (h) ui.dot.style.transform = `translate(${h.cx * innerWidth}px, ${h.cy * innerHeight}px)`;
+  ui.dot.classList.toggle('finger', h?.mode === 'finger');
+  if (h) {
+    const x = h.mode === 'finger' ? h.tipX : h.cx, y = h.mode === 'finger' ? h.tipY : h.cy;
+    ui.dot.style.transform = `translate(${x * innerWidth}px, ${y * innerHeight}px)`;
+  }
 }
 
 // ---------- 촬영 ----------
@@ -264,7 +275,8 @@ if (MOUSE) {
   let down = false;
   const fake = (e) => {
     const x = e.clientX / innerWidth, y = e.clientY / innerHeight;
-    return [{ minX: x - 0.03, maxX: x + 0.03, cx: x, cy: y, open: true }];
+    // Shift 키를 누른 채 드래그하면 손가락 모드로 테스트
+    return [{ minX: x - 0.03, maxX: x + 0.03, cx: x, cy: y, tipX: x, tipY: y, mode: e.shiftKey ? 'finger' : 'palm' }];
   };
   canvas.addEventListener('pointerdown', (e) => {
     if (!running) return;

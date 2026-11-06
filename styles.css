@@ -271,3 +271,6 @@ h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
 .shot .btn.ghost { color: var(--accent-deep); border-color: var(--accent-deep); background: transparent; }
 .btn.link { background: none; color: #6b5a60; font-weight: 600; font-size: 14px; padding: 8px; }
 .btn.link:hover { text-decoration: underline; }
+
+.hand-dot.finger { width: 22px; height: 22px; margin: -11px 0 0 -11px; }
+.hand-dot.finger.wiping { width: 28px; height: 28px; margin: -14px 0 0 -14px; }

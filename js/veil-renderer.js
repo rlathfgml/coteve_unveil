@@ -18,7 +18,7 @@ export const LOOK = {
   washAmount: 0.26,      // 옅은 색이 흐린 영상을 덮는 정도 (0~1)
   glowAmount: 0.72,      // Inner Glow 최대 진하기 (0~1)
   glowGain: 2.2,         // 닦인 영역 주변 글로우 세기
-  veilOpacity: 0.84,     // 베일 전체 불투명도 (낮을수록 뒤의 카메라 화면이 더 비침)
+  veilOpacity: 0.94,     // 베일 전체 불투명도 (낮을수록 뒤의 카메라 화면이 더 비침)
   glowWidthFrame: 0.11,  // 화면 테두리에서 안쪽으로 번지는 폭 (화면 높이 비율)
   edgePx: 1.5,           // 막 닦인 경계선의 부드러움 (픽셀, 작을수록 또렷)
   blurPasses: 3,         // 영상 블러 반복 횟수 (클수록 더 흐림)

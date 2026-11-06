@@ -1,20 +1,17 @@
 // =============================================================
 // '닦기' 동작 판단 + 손이 지나간 길(스트로크) 기록
 //
-// - 손을 편 채로 좌→우 / 우→좌로 일정 속도 이상 움직이면 '닦는 중'
-// - 닦는 동안 손바닥 중심이 지나간 길을 기록 → 이 길에 맞춰 호(arc)를 그려 베일을 지움
-// - 손을 멈추거나 방향을 바꾸면 한 번의 닦기가 끝나고, 다음 움직임은 새 닦기로 이어짐
-//   → 손이 움직이는 대로 계속 지워지고, 지워진 곳은 다시 가려지지 않음
+// - 손을 편 채(손바닥) 또는 검지를 편 채(손가락)로 일정 속도 이상 움직이면 닦기 시작
+// - 한 번 시작하면, 같은 손 모양이 유지되는 동안은 천천히 움직여도 계속 따라가며 닦음
+//   (잠깐 손을 놓치거나 모양이 흐트러져도 keepGap 초 안에 돌아오면 이어서 닦음)
+// - 손바닥 → 손바닥 중심을 따라 넓게, 손가락 → 검지 끝을 따라 얇게
 // =============================================================
 
 export const WIPE = {
-  startSpeed: 0.35,   // 닦기 시작으로 인정하는 손 속도 (초당 화면 가로 비율)
-  keepSpeed: 0.12,    // 닦는 중일 때 유지되는 최소 속도
-  stopDelay: 0.12,    // 이 시간(초) 동안 느리면 한 번의 닦기가 끝난 것으로 처리
-  maxGap: 0.25,       // 이 시간(초) 이상 손이 안 보이면 새 동작으로 취급
+  startSpeed: 0.45,   // 닦기 시작으로 인정하는 손 속도 (초당 화면 비율) — 클수록 덜 민감
+  keepGap: 0.4,       // 손을 잠깐 놓치거나 모양이 흐트러져도 닦기를 이어가는 시간 (초)
   matchRadius: 0.4,   // 직전 프레임과 같은 손으로 볼 최대 이동 거리
-  smoothing: 0.5,     // 손 위치 흔들림 줄이기 (0~1, 클수록 부드럽지만 늦게 따라옴)
-  requireOpenHand: true,
+  smoothing: 0.45,    // 손 위치 흔들림 줄이기 (0~1, 클수록 부드럽지만 늦게 따라옴)
 };
 
 export class WipeController {
@@ -22,17 +19,17 @@ export class WipeController {
 
   reset() {
     this.tracks = [];
-    this.finished = [];   // 끝난 닦기 (화면에 영구히 새길 것)
+    this.finished = [];   // 끝난 닦기
     this.started = false;
     this.wipingNow = false;
   }
 
-  /** 지금 진행 중인 닦기들 (매 프레임 다시 그려짐) */
+  /** 지금 진행 중인 닦기들 */
   get activeStrokes() {
     return this.tracks.filter((t) => t.stroke).map((t) => t.stroke);
   }
 
-  /** 끝난 닦기를 꺼내 감 (렌더러가 영구 기록) */
+  /** 끝난 닦기를 꺼내 감 */
   takeFinished() {
     const f = this.finished;
     this.finished = [];
@@ -40,7 +37,7 @@ export class WipeController {
   }
 
   _end(stroke) {
-    if (stroke && stroke.points.length > 1) this.finished.push(stroke);
+    if (stroke) this.finished.push(stroke);
   }
 
   /** @param hands handsToScreen() 결과, @param t 초 단위 시간 */
@@ -50,7 +47,7 @@ export class WipeController {
     this.wipingNow = false;
 
     for (const h of hands) {
-      // 직전 프레임의 같은 손 찾기 (가장 가까운 것)
+      // 직전 프레임의 같은 손 찾기 (손바닥 중심이 가장 가까운 것)
       let best = null, bestD = WIPE.matchRadius;
       for (const tr of this.tracks) {
         if (used.has(tr)) continue;
@@ -59,51 +56,57 @@ export class WipeController {
       }
       if (best) used.add(best);
 
-      const tr = { rx: h.cx, ry: h.cy, x: h.cx, y: h.cy, w: h.maxX - h.minX, t, vx: 0, slowSince: null, stroke: null };
+      // 닦는 위치: 손바닥이면 손바닥 중심, 손가락이면 검지 끝
+      const px = h.mode === 'finger' ? h.tipX : h.cx;
+      const py = h.mode === 'finger' ? h.tipY : h.cy;
+      const tr = { rx: h.cx, ry: h.cy, px, py, x: px, y: py, mode: h.mode, t, speed: 0, stroke: null, lostSince: null };
 
-      if (best && t - best.t < WIPE.maxGap) {
-        const dt = Math.max(t - best.t, 1 / 120); // 같은 시각에 들어온 입력도 처리
-        const a = WIPE.smoothing;
-        tr.x = best.x * a + h.cx * (1 - a);
-        tr.y = best.y * a + h.cy * (1 - a);
-        const raw = (h.cx - best.rx) / dt;
-        tr.vx = best.vx * 0.5 + raw * 0.5;
-        const speed = Math.abs(tr.vx);
-        const openOk = !WIPE.requireOpenHand || h.open;
+      if (best && t - best.t < WIPE.keepGap) {
+        const dt = Math.max(t - best.t, 1 / 120);
+        const sameMode = best.mode === h.mode;
+        if (sameMode && h.mode) {
+          const a = WIPE.smoothing;
+          tr.x = best.x * a + px * (1 - a);
+          tr.y = best.y * a + py * (1 - a);
+          const raw = Math.hypot(px - best.px, py - best.py) / dt;
+          tr.speed = best.speed * 0.5 + raw * 0.5;
+        }
         let stroke = best.stroke;
 
-        // 방향이 바뀌면 지금 닦기를 끝내고 새로 시작
-        if (stroke && Math.sign(tr.vx) !== stroke.dir && speed > WIPE.startSpeed) {
-          this._end(stroke);
-          stroke = null;
-        }
-
         if (stroke) {
-          if (speed < WIPE.keepSpeed || !openOk) {
-            tr.slowSince = best.slowSince ?? t;
-            if (t - tr.slowSince > WIPE.stopDelay) { this._end(stroke); stroke = null; }
+          if (h.mode === stroke.mode) {
+            const last = stroke.points[stroke.points.length - 1];
+            if (Math.hypot(tr.x - last.x, tr.y - last.y) > 0.002) stroke.points.push({ x: tr.x, y: tr.y });
+            this.wipingNow = true;
+          } else if (h.mode === null) {
+            // 손 모양이 잠깐 흐트러짐: 바로 끊지 않고 잠시 기다림
+            tr.lostSince = best.lostSince ?? t;
+            tr.x = best.x; tr.y = best.y; tr.mode = stroke.mode;
+            if (t - tr.lostSince > WIPE.keepGap) { this._end(stroke); stroke = null; }
+          } else {
+            // 손바닥 ↔ 손가락 전환: 지금 닦기를 끝내고 새로 시작할 수 있게
+            this._end(stroke); stroke = null;
           }
-        } else if (openOk && speed > WIPE.startSpeed) {
-          // 새 닦기 시작: 직전 위치부터 기록
-          stroke = { dir: Math.sign(tr.vx), points: [{ x: best.x, y: best.y }], width: tr.w };
-          this.started = true;
         }
 
-        if (stroke) {
-          const last = stroke.points[stroke.points.length - 1];
-          if (Math.hypot(tr.x - last.x, tr.y - last.y) > 0.004) stroke.points.push({ x: tr.x, y: tr.y });
-          stroke.width = Math.max(stroke.width * 0.9, tr.w);
+        if (!stroke && h.mode && sameMode && tr.speed > WIPE.startSpeed) {
+          stroke = { mode: h.mode, points: [{ x: best.x, y: best.y }, { x: tr.x, y: tr.y }], width: h.maxX - h.minX };
+          this.started = true;
           this.wipingNow = true;
         }
         tr.stroke = stroke;
       } else if (best) {
-        this._end(best.stroke); // 너무 오래 안 보였던 손: 이전 닦기 마무리
+        this._end(best.stroke);
       }
       next.push(tr);
     }
 
-    // 화면에서 사라진 손의 닦기는 마무리
-    for (const old of this.tracks) if (!used.has(old)) this._end(old.stroke);
+    // 이번 프레임에 안 보인 손: 잠깐은 기억해 두었다가(다시 나타나면 이어서 닦기), 오래 안 보이면 마무리
+    for (const old of this.tracks) {
+      if (used.has(old)) continue;
+      if (t - old.t < WIPE.keepGap) next.push(old);
+      else this._end(old.stroke);
+    }
     this.tracks = next;
   }
 
