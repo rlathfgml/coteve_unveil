@@ -126,6 +126,8 @@ async function start() {
 function goHome() {
   session++;
   running = false;
+  stopRecording(true); // 녹화 중이었다면 저장하지 않고 끝냄
+  show(ui.countdown, false);
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } // 카메라 끄기
   video.pause();
   video.srcObject = null;
@@ -227,38 +229,114 @@ function updateHandUi(hands) {
   }
 }
 
-// ---------- 촬영 ----------
-let shotCanvas = null;   // 촬영 순간의 화면
-let shooting = false;
+// ---------- 촬영 (사진 / 영상) ----------
+const MAX_REC = 15;      // 영상 최대 길이 (초)
+let captureMode = 'photo';
+let shooting = false;    // 카운트다운 중
+let recorder = null;     // 녹화 중일 때
+let recTimer = null;
+let result = null;       // { kind: 'photo' | 'video', blob }
+const shootBtn = $('shoot-btn');
+const modeBox = document.querySelector('.capture-mode');
+const recBadge = $('rec-badge'), recTime = $('rec-time');
+const shotVideo = $('shot-video');
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function shoot() {
-  if (shooting || !running) return;
-  shooting = true;
-  ui.hint.classList.add('gone');
+function setCaptureMode(mode) {
+  captureMode = mode;
+  document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('selected', b.dataset.mode === mode));
+  shootBtn.textContent = mode === 'photo' ? '사진 찍기' : '영상 녹화';
+}
+document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => setCaptureMode(b.dataset.mode)));
+if (!cap.canRecord()) document.querySelector('.mode-btn[data-mode="video"]').classList.add('hidden');
+
+async function countdown() {
   show(ui.countdown, true);
   for (const n of [3, 2, 1]) {
     ui.countdown.innerHTML = `<span>${n}</span>`;
     await wait(900);
   }
   show(ui.countdown, false);
-  shotCanvas = cap.snapshot(canvas);        // 화면(영상 + 베일)만 찍힘, 버튼 등은 안 찍힘
-  ui.flash.classList.remove('go'); void ui.flash.offsetWidth; ui.flash.classList.add('go');
-  ui.shotImg.src = shotCanvas.toDataURL('image/jpeg', 0.85);
-  show(ui.shareBtn, cap.canShareFiles());
-  show(ui.shot, true);
+}
+
+async function shoot() {
+  if (!running) return;
+  if (recorder) return stopRecording();    // 녹화 중에 누르면 녹화 끝내기
+  if (shooting) return;
+  shooting = true;
+  modeBox.classList.add('locked');
+  ui.hint.classList.add('gone');
+  const my = session;
+  await countdown();
+  if (my !== session) { shooting = false; modeBox.classList.remove('locked'); return; }
+
+  if (captureMode === 'photo') {
+    const shot = cap.snapshot(canvas);      // 화면(영상 + 베일)만 찍힘, 버튼 등은 안 찍힘
+    ui.flash.classList.remove('go'); void ui.flash.offsetWidth; ui.flash.classList.add('go');
+    showResult({ kind: 'photo', blob: await cap.toBlob(shot) });
+    modeBox.classList.remove('locked');
+  } else {
+    recorder = cap.startRecording(canvas);
+    shootBtn.textContent = '■ 녹화 끝내기';
+    shootBtn.classList.add('recording');
+    show(recBadge, true);
+    const t0 = performance.now();
+    const tick = () => {
+      const sec = (performance.now() - t0) / 1000;
+      recTime.textContent = `0:${String(Math.floor(sec)).padStart(2, '0')} / 0:${MAX_REC}`;
+      if (sec >= MAX_REC) stopRecording();
+    };
+    tick();
+    recTimer = setInterval(tick, 200);
+  }
   shooting = false;
 }
 
-function closeShot() { show(ui.shot, false); }
+async function stopRecording(discard = false) {
+  if (!recorder) return;
+  const r = recorder;
+  recorder = null;
+  clearInterval(recTimer);
+  show(recBadge, false);
+  shootBtn.classList.remove('recording');
+  setCaptureMode(captureMode);
+  modeBox.classList.remove('locked');
+  const blob = await r.stop();
+  if (!discard && blob.size) showResult({ kind: 'video', blob });
+}
 
-$('save-btn').addEventListener('click', () => shotCanvas && cap.download(shotCanvas));
+function showResult(res) {
+  if (result?.url) URL.revokeObjectURL(result.url);
+  result = { ...res, url: URL.createObjectURL(res.blob) };
+  const isVideo = res.kind === 'video';
+  show(ui.shotImg, !isVideo);
+  show(shotVideo, isVideo);
+  if (isVideo) { shotVideo.src = result.url; shotVideo.play().catch(() => {}); }
+  else { ui.shotImg.src = result.url; shotVideo.removeAttribute('src'); }
+  $('shot-title').textContent = isVideo ? '멋진 영상이 담겼어요' : '멋진 순간이 담겼어요';
+  $('shot-sub').textContent = isVideo ? '화면 그대로 영상으로 저장할 수 있어요.' : '화면 그대로 이미지로 저장할 수 있어요.';
+  $('save-btn').textContent = isVideo ? '영상 저장' : '이미지 저장';
+  let canShare = false;
+  try {
+    const f = new File([res.blob], 'x', { type: res.blob.type });
+    canShare = !!navigator.canShare && navigator.canShare({ files: [f] });
+  } catch { canShare = false; }
+  show(ui.shareBtn, canShare);
+  show(ui.shot, true);
+}
+
+function closeShot() {
+  show(ui.shot, false);
+  shotVideo.pause();
+}
+
+$('save-btn').addEventListener('click', () => result && cap.downloadBlob(result.blob));
 ui.shareBtn.addEventListener('click', async () => {
-  try { if (shotCanvas) await cap.share(shotCanvas); } catch (e) { console.warn(e); }
+  try { if (result) await cap.shareBlob(result.blob); } catch (e) { console.warn(e); }
 });
 $('close-shot-btn').addEventListener('click', closeShot);
-$('shoot-btn').addEventListener('click', shoot);
+shootBtn.addEventListener('click', shoot);
 
 // ---------- 마우스 테스트 모드 ----------
 if (MOUSE) {

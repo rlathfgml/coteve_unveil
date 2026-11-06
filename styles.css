@@ -253,7 +253,7 @@ h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
   text-align: left;
 }
-#shot-img {
+#shot-img, #shot-video {
   display: block;
   max-height: calc(88vh - 56px);
   max-width: 46vw;
@@ -271,3 +271,34 @@ h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
 
 .hand-dot.finger { width: 22px; height: 22px; margin: -11px 0 0 -11px; }
 .hand-dot.finger.wiping { width: 28px; height: 28px; margin: -14px 0 0 -14px; }
+
+/* ---------- 사진 / 영상 선택 ---------- */
+.capture-mode {
+  display: flex; gap: 2px; padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+.mode-btn {
+  border: 0; border-radius: 999px; padding: 11px 18px;
+  font: inherit; font-size: 14px; font-weight: 700;
+  color: #fff; background: transparent; cursor: pointer;
+}
+.mode-btn.selected { background: #fff; color: var(--accent-deep); }
+.capture-mode.locked { opacity: 0.5; pointer-events: none; }
+
+#shoot-btn.recording { background: #e5484d; color: #fff; }
+
+.rec-badge {
+  position: fixed; top: 74px; left: 50%; transform: translateX(-50%);
+  z-index: 26; display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45); color: #fff;
+  font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #ff4d4f; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.2; } }

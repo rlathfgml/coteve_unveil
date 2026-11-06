@@ -53,21 +53,27 @@
     <p id="hint" class="hint">손을 펴고, 손날로 화면을 좌우로 쓸어 주세요</p>
     <div class="bottom-bar">
       <button id="reset-btn" class="btn ghost">다시 체험하기</button>
-      <button id="shoot-btn" class="btn primary">촬영하기</button>
+      <div class="capture-mode" role="radiogroup" aria-label="촬영 방식">
+        <button class="mode-btn selected" data-mode="photo">사진</button>
+        <button class="mode-btn" data-mode="video">영상</button>
+      </div>
+      <button id="shoot-btn" class="btn primary">사진 찍기</button>
     </div>
   </div>
 
   <!-- 촬영 카운트다운 / 플래시 -->
   <div id="countdown" class="countdown hidden"></div>
+  <div id="rec-badge" class="rec-badge hidden"><span class="rec-dot"></span><span id="rec-time">0:00</span></div>
   <div id="flash" class="flash"></div>
 
   <!-- 촬영 결과 -->
   <section id="shot" class="overlay shot hidden">
     <div class="shot-card">
       <img id="shot-img" alt="촬영한 이미지 미리보기" />
+      <video id="shot-video" class="hidden" muted loop playsinline autoplay></video>
       <div class="shot-side">
-        <h2>멋진 순간이 담겼어요</h2>
-        <p class="shot-sub">화면 그대로 이미지로 저장할 수 있어요.</p>
+        <h2 id="shot-title">멋진 순간이 담겼어요</h2>
+        <p id="shot-sub" class="shot-sub">화면 그대로 이미지로 저장할 수 있어요.</p>
         <button id="save-btn" class="btn primary wide">이미지 저장</button>
         <button id="share-btn" class="btn ghost wide hidden">공유하기</button>
         <button id="close-shot-btn" class="btn link">닫고 계속 체험하기</button>
