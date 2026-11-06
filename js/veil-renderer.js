@@ -247,7 +247,7 @@ export class VeilRenderer {
     this.vao = gl.createVertexArray();
     this.srcTex = makeTex(gl);
     this.clearSource();
-    this.setColor('#FF80A0');
+    this.setColor('#AB7EFF');
     this.bandHalf = 0.2;  // 붓 반지름 (화면 높이 비율) — 크기 슬라이더로 바뀜
 
     this.fbos = [this._makeFbo(), this._makeFbo()];       // 영상 블러

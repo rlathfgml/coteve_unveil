@@ -1,8 +1,8 @@
 :root {
   /* 선택한 베일 컬러에 따라 app.js 가 바꿔 줘요 */
-  --accent: #ff80a0;
-  --accent-deep: #c9466b;
-  --accent-shadow: rgba(201, 70, 107, 0.45);
+  --accent: #ab7eff;
+  --accent-deep: rgb(106, 78, 158);
+  --accent-shadow: rgba(106, 78, 158, 0.5);
   --white: #fff;
 }
 
@@ -147,9 +147,19 @@ h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
 @keyframes breathe { 50% { opacity: 0.65; } }
 .hint.gone { opacity: 0 !important; animation: none; }
 
+.hud-logo {
+  position: absolute;
+  left: 50%; top: 26px;
+  transform: translateX(-50%);
+  width: 104px;
+  height: auto;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px var(--accent-shadow)) drop-shadow(0 2px 14px var(--accent-shadow));
+}
+
 .done-copy {
   position: absolute;
-  left: 0; right: 0; top: 2.2vh;
+  left: 0; right: 0; top: calc(26px + 40px);
   margin: 0;
   text-align: center;
   font-size: clamp(26px, 3.6vw, 48px);

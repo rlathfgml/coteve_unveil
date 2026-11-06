@@ -67,7 +67,7 @@ function setColor(hex) {
 }
 document.querySelectorAll('.swatch').forEach((s) =>
   s.addEventListener('click', () => setColor(s.dataset.color)));
-setColor('#FF80A0');
+setColor('#AB7EFF'); // 처음 시작 컬러: 보라색
 
 // ---------- 닦이는 크기 ----------
 function setSize(v) { if (renderer) renderer.bandHalf = v; }
