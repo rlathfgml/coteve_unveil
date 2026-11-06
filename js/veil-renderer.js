@@ -8,15 +8,17 @@
 //  4) 닦인 영역 안쪽은 색·블러 없이 완전히 선명
 //
 // 닦이는 모양 = 손이 지나간 길을 따라 그린 '호 모양 띠'
-//  - 닦을 때마다 새 호가 더해지고(누적), 지워진 곳은 다시 가려지지 않음
+//  - 닦을 때마다 새 호가 더해지고(누적)
+//  - 시간이 지나면 닦인 곳 가장자리부터 베일이 천천히 다시 차오름 (재응결)
 //  - 각 호까지의 '거리'를 기억 텍스처에 저장 → 경계선은 또렷하고, 그 바깥쪽 베일 테두리에 컬러 글로우
 // =============================================================
 
 // 디자인 수치는 여기서 쉽게 조절할 수 있어요.
 export const LOOK = {
   washMix: 0.72,         // 베일 가운데 옅은 색 = 선택 컬러를 흰색과 섞는 비율 (클수록 옅음)
-  washAmount: 0.38,      // 옅은 색이 흐린 영상을 덮는 정도 (0~1)
-  glowAmount: 0.82,      // Inner Glow 최대 진하기 (0~1)
+  washAmount: 0.26,      // 옅은 색이 흐린 영상을 덮는 정도 (0~1)
+  glowAmount: 0.72,      // Inner Glow 최대 진하기 (0~1)
+  veilOpacity: 0.84,     // 베일 전체 불투명도 (낮을수록 뒤의 카메라 화면이 더 비침)
   glowWidthWindow: 0.075,// 닦인 영역 경계에서 베일 쪽으로 번지는 폭 (화면 높이 비율)
   glowWidthFrame: 0.11,  // 화면 테두리에서 안쪽으로 번지는 폭 (화면 높이 비율)
   edgeSoftness: 0.003,   // 경계선 부드러움 (작을수록 또렷)
@@ -25,6 +27,10 @@ export const LOOK = {
   blurWidth: 200,        // 블러용 축소 해상도(가로 픽셀)
   cornerRadius: 0.035,   // 호 띠 양 끝 모서리 둥글기 (화면 높이 비율)
   maskScale: 0.5,        // 닦인 영역 기억 텍스처 해상도 (화면 대비)
+
+  // ---- 다시 덮이기 (재응결) ----
+  refogDelay: 4,         // 닦인 뒤 선명하게 유지되는 시간 (초)
+  refogSpeed: 0.035,     // 그 뒤 베일이 가장자리부터 차오르는 속도 (초당 화면 높이 비율)
 };
 
 const VERT = `#version 300 es
@@ -93,7 +99,25 @@ void main() {
   float dr = abs(r - uRho) - uHalf;
   vec2 q = vec2(da, dr) + uCorner;
   float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uCorner;
-  o = vec4(clamp(0.5 - d / (2.0 * uRange), 0.0, 1.0), 0.0, 0.0, 1.0);
+  float val = clamp(0.5 - d / (2.0 * uRange), 0.0, 1.0);
+  // G = 유지 타이머 (닦인 곳과 그 주변은 1로 채움 → 시간이 지나며 줄어듦)
+  o = vec4(val, step(0.35, val), 0.0, 1.0);
+}`;
+
+// 시간이 지나면: 유지 타이머(G)를 줄이고, 타이머가 끝난 곳은 거리 값(R)을 줄여 베일이 다시 차오르게
+const DECAY_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uMask;
+uniform float uDt;
+uniform float uHold;
+uniform float uShrink;
+void main() {
+  vec4 m = texture(uMask, vUv);
+  float g = max(m.g - uDt / uHold, 0.0);
+  float r = m.g > 0.0 ? m.r : max(m.r - uShrink * uDt, 0.0);
+  o = vec4(r, g, 0.0, 1.0);
 }`;
 
 // 닦인 비율 계산용 (작은 텍스처로 줄이기)
@@ -128,6 +152,7 @@ uniform float uGlowAmt;
 uniform float uGlowWin;
 uniform float uGlowFrame;
 uniform float uEdge;
+uniform float uOpacity;
 
 vec2 srcUv(vec2 s) {
   vec2 v = (s - 0.5) * uCover + 0.5;
@@ -160,7 +185,7 @@ void main() {
   vec3 veil = mix(blur, uWash, uWashAmt);
   veil = mix(veil, uGlow, glow * uGlowAmt);
 
-  o = vec4(mix(sharp, veil, veilMask), 1.0);
+  o = vec4(mix(sharp, veil, veilMask * uOpacity), 1.0);
 }`;
 
 function compile(gl, type, src) {
@@ -213,6 +238,7 @@ export class VeilRenderer {
     this.blurProg = program(gl, BLUR_FRAG);
     this.strokeProg = program(gl, STROKE_FRAG);
     this.coverProg = program(gl, COVER_FRAG);
+    this.decayProg = program(gl, DECAY_FRAG);
     this.compProg = program(gl, COMP_FRAG);
     this.vao = gl.createVertexArray();
     this.srcTex = makeTex(gl);
@@ -221,7 +247,8 @@ export class VeilRenderer {
     this.bandHalf = 0.2;  // 닦이는 띠 두께의 절반 (화면 높이 비율) — 크기 슬라이더로 바뀜
 
     this.fbos = [this._makeFbo(), this._makeFbo()];
-    this.mask = this._makeFbo();   // 끝난 닦기들
+    this.masks = [this._makeFbo(), this._makeFbo()]; // 끝난 닦기들 (번갈아 쓰기)
+    this.decayAcc = 0;
     this.live = this._makeFbo();   // 진행 중인 닦기
     this.tiny = this._makeFbo();   // 닦인 비율 계산용
     this._sizeFbo(this.tiny, 48, 27, false);
@@ -270,20 +297,41 @@ export class VeilRenderer {
     const bh = Math.max(2, Math.round(bw * h / w));
     this.fbos.forEach((f) => this._sizeFbo(f, bw, bh, false));
     const mw = Math.round(w * LOOK.maskScale), mh = Math.round(h * LOOK.maskScale);
-    this._sizeFbo(this.mask, mw, mh, this.floatMask);
-    this._sizeFbo(this.live, mw, mh, this.floatMask);
-    this._clear(this.mask);   // 창 크기가 바뀌면 닦인 기록은 초기화
+    this.masks.forEach((m) => { this._sizeFbo(m, mw, mh, this.floatMask); this._clear(m); });
+    this._sizeFbo(this.live, mw, mh, this.floatMask); // 창 크기가 바뀌면 닦인 기록은 초기화
     this._clear(this.live);
   }
 
   /** 닦인 기록 모두 지우기 (다시 체험하기) */
   clearWipes() {
-    this._clear(this.mask);
+    this.masks.forEach((m) => this._clear(m));
     this._clear(this.live);
     this.coverage = 0;
   }
 
   get range() { return this.canvas.height * 0.3; }
+  get mask() { return this.masks[0]; }
+
+  /** 시간이 흐름에 따라 닦인 곳이 다시 덮이게 함 */
+  decay(dt) {
+    // 8비트 기록일 때는 변화가 너무 작아 반영이 안 되므로 0.1초씩 모아서 처리
+    this.decayAcc += dt;
+    const step = this.floatMask ? this.decayAcc : (this.decayAcc >= 0.1 ? this.decayAcc : 0);
+    if (!step) return;
+    this.decayAcc = 0;
+    const gl = this.gl, d = this.decayProg;
+    const [src, dst] = this.masks;
+    gl.bindVertexArray(this.vao);
+    this._pass(d, dst, dst.w, dst.h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.uniform1i(d.u.uMask, 0);
+    gl.uniform1f(d.u.uDt, step);
+    gl.uniform1f(d.u.uHold, LOOK.refogDelay);
+    gl.uniform1f(d.u.uShrink, (LOOK.refogSpeed * this.canvas.height) / (2 * this.range));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.masks = [dst, src];
+  }
 
   _drawArcs(target, arcs) {
     if (!arcs.length) return;
@@ -438,6 +486,7 @@ export class VeilRenderer {
     gl.uniform1f(c.u.uGlowWin, LOOK.glowWidthWindow);
     gl.uniform1f(c.u.uGlowFrame, LOOK.glowWidthFrame);
     gl.uniform1f(c.u.uEdge, LOOK.edgeSoftness);
+    gl.uniform1f(c.u.uOpacity, LOOK.veilOpacity);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.activeTexture(gl.TEXTURE0);
   }

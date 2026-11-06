@@ -266,13 +266,6 @@ h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
 .shot-side { display: flex; flex-direction: column; gap: 12px; width: 260px; }
 .shot-side h2 { margin: 0; font-size: 22px; }
 .shot-sub { margin: 0 0 6px; font-size: 14px; color: #6b5a60; }
-.format-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 999px; background: #f2eaed; margin-bottom: 6px; }
-.tab {
-  flex: 1; border: 0; border-radius: 999px; padding: 9px 0;
-  font: inherit; font-size: 14px; font-weight: 700; color: #6b5a60;
-  background: transparent; cursor: pointer;
-}
-.tab.selected { background: #fff; color: var(--accent-deep); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1); }
 .btn.wide { width: 100%; }
 .shot .btn.primary { background: var(--accent-deep); color: #fff; }
 .shot .btn.ghost { color: var(--accent-deep); border-color: var(--accent-deep); background: transparent; }
