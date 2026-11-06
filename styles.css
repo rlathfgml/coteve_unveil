@@ -4,7 +4,12 @@
   --accent-deep: rgb(106, 78, 158);
   --accent-shadow: rgba(106, 78, 158, 0.5);
   --white: #fff;
+  /* 영문 폰트: Adobe Fonts 코드가 연결되면 ITC Avant Garde Gothic Pro, 없으면 Pretendard 로 대신 표시 */
+  --font-en: "itc-avant-garde-gothic-pro", "ITC Avant Garde Gothic Pro", "Pretendard", sans-serif;
 }
+
+.en { font-family: var(--font-en); }
+#intro h1.en { font-weight: 700; letter-spacing: -0.01em; }
 
 * { box-sizing: border-box; }
 
@@ -59,7 +64,7 @@ html, body {
 }
 
 #intro .desc, #intro .fine { color: var(--accent-deep); }
-#intro .desc { font-weight: 600; }
+#intro .desc { font-weight: 600; white-space: nowrap; } /* 국문 안내 한 줄 */
 
 h1 {
   margin: 0;
