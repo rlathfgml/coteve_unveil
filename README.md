@@ -1,6 +1,10 @@
 # coteve — Unveil Your Smile (베일 닦기 웹 체험)
 
-웹캠 영상 위에 핑크 베일이 덮여 있고, 손날로 화면을 좌우로 쓸면 베일이 걷히며 선명한 얼굴이 드러나는 웹 체험입니다.
+웹캠 영상 위에 컬러 베일이 덮여 있고, 손날로 화면을 좌우로 쓸면 와이퍼처럼 호를 그리며 베일이 걷혀 선명한 얼굴이 드러나는 웹 체험입니다.
+
+- 베일 컬러 4종 선택 (분홍 #FF80A0 / 보라 #AB7EFF / 하늘 #80EAFF / 민트 #8EFFC3)
+- '닦이는 크기' 슬라이더로 닦이는 띠 두께 조절
+- '처음으로' 버튼으로 홈 화면 복귀 (카메라도 꺼짐)
 
 ## 실행 방법
 1. 터미널에서 이 폴더로 이동: `cd ~/Desktop/Coteve_Ai`
@@ -14,7 +18,7 @@
 
 ## 파일 구성
 - `index.html`, `styles.css` : 화면과 버튼, 문구
-- `js/veil-renderer.js` : 베일 그래픽 (블러·핑크·Inner Glow). 맨 위 `LOOK` 값으로 색/번짐 조절
+- `js/veil-renderer.js` : 베일 그래픽 (블러·컬러·Inner Glow·호 모양). 맨 위 `LOOK` 값으로 번짐/호 모양 조절
 - `js/wipe-controller.js` : 닦기 동작 판단. 맨 위 `WIPE` 값으로 민감도 조절
 - `js/hand-tracker.js` : MediaPipe 손 인식
 - `js/app.js` : 전체 흐름

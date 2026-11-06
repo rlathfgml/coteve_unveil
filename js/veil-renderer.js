@@ -3,25 +3,33 @@
 //
 // 레퍼런스(피그마 Inner Glow + Layer Blur)를 화면에서 재현하는 방식:
 //  1) 웹캠 영상을 작게 줄여 여러 번 흐리게(블러) 만든다  → "베일 속 흐린 얼굴"
-//  2) 화면을 "닦인 창(선명)"과 "베일(흐림+핑크)"로 나눈다
-//  3) 핑크 색은 베일 조각의 '테두리 안쪽'에만 짙게 맺힌다 (Inner Glow)
-//     - 베일 가운데: 흐린 영상이 옅은 핑크로 비침
-//     - 베일 가장자리(화면 테두리 / 닦인 창과의 경계): 진한 핑크
-//  4) 닦인 창 안쪽은 색·블러 없이 완전히 선명
+//  2) 화면을 "닦인 영역(선명)"과 "베일(흐림+컬러)"로 나눈다
+//  3) 컬러는 베일 조각의 '테두리 안쪽'에만 짙게 맺힌다 (Inner Glow)
+//  4) 닦인 영역 안쪽은 색·블러 없이 완전히 선명
+//
+// 닦이는 모양 = 자동차 와이퍼처럼 '화면 아래 보이지 않는 축'을 중심으로 도는 호(arc)
+//  - 손이 좌우로 움직이면 경계가 축을 중심으로 회전하며 호를 그리며 열림
+//  - 닦인 영역은 휘어진 띠 모양, 위/아래 모서리에는 초승달 모양 베일이 남음
 // =============================================================
 
 // 디자인 수치는 여기서 쉽게 조절할 수 있어요.
 export const LOOK = {
-  washColor: [0.985, 0.83, 0.87],  // 베일 가운데에 깔리는 옅은 핑크
-  washAmount: 0.38,                // 옅은 핑크가 흐린 영상을 덮는 정도 (0~1)
-  glowColor: [0.92, 0.47, 0.62],   // 테두리 안쪽의 진한 핑크 (Inner Glow)
-  glowAmount: 0.82,                // Inner Glow 최대 진하기 (0~1)
-  glowWidthWindow: 0.075,          // 닦인 창 경계에서 베일 쪽으로 번지는 폭 (화면 높이 비율)
-  glowWidthFrame: 0.11,            // 화면 테두리에서 안쪽으로 번지는 폭 (화면 높이 비율)
-  edgeSoftness: 0.003,             // 경계선 부드러움 (작을수록 또렷)
-  blurPasses: 3,                   // 블러 반복 횟수 (클수록 더 흐림)
-  blurSpread: 2.2,                 // 블러 퍼짐 정도
-  blurWidth: 200,                  // 블러용 축소 해상도(가로 픽셀)
+  washMix: 0.72,         // 베일 가운데 옅은 색 = 선택 컬러를 흰색과 섞는 비율 (클수록 옅음)
+  washAmount: 0.38,      // 옅은 색이 흐린 영상을 덮는 정도 (0~1)
+  glowAmount: 0.82,      // Inner Glow 최대 진하기 (0~1)
+  glowWidthWindow: 0.075,// 닦인 영역 경계에서 베일 쪽으로 번지는 폭 (화면 높이 비율)
+  glowWidthFrame: 0.11,  // 화면 테두리에서 안쪽으로 번지는 폭 (화면 높이 비율)
+  edgeSoftness: 0.003,   // 경계선 부드러움 (작을수록 또렷)
+  blurPasses: 3,         // 블러 반복 횟수 (클수록 더 흐림)
+  blurSpread: 2.2,       // 블러 퍼짐 정도
+  blurWidth: 200,        // 블러용 축소 해상도(가로 픽셀)
+
+  // ---- 호(arc) 모양 ----
+  pivotX: 0.5,           // 회전축 가로 위치 (화면 가로 비율)
+  pivotY: 2.2,           // 회전축 세로 위치 (화면 높이 기준, 1 = 화면 맨 아래)
+  arcRadius: 1.75,       // 닦이는 띠의 중심 반지름 (화면 높이 기준)
+  arcBulge: 0.035,       // 닦기 경계(앞쪽 끝)가 볼록하게 휘는 정도
+  cornerRadius: 0.04,    // 닦인 영역 모서리 둥글기 (화면 높이 비율)
 };
 
 const VERT = `#version 300 es
@@ -75,8 +83,12 @@ uniform sampler2D uBlur;
 uniform vec2 uRes;
 uniform vec2 uCover;
 uniform float uMirror;
-uniform vec2 uLR;        // 닦인 창의 왼쪽/오른쪽 경계 (화면 가로 비율)
-uniform float uOpen;     // 닦인 창이 존재하는 정도 (0~1)
+uniform vec2 uAng;       // 닦인 영역의 왼쪽/오른쪽 경계 각도 (라디안, 0 = 위쪽)
+uniform vec3 uArc;       // 회전축 x, y, 띠 중심 반지름 (픽셀)
+uniform float uHalf;     // 띠 두께의 절반 (픽셀)
+uniform float uBulge;    // 경계 볼록함 (라디안)
+uniform float uCorner;   // 모서리 둥글기 (픽셀)
+uniform float uOpen;     // 닦인 영역이 존재하는 정도 (0~1)
 uniform vec3 uWash;
 uniform float uWashAmt;
 uniform vec3 uGlow;
@@ -91,33 +103,27 @@ vec2 srcUv(vec2 s) {
   return v;
 }
 
-// 닦인 창 모양까지의 거리(픽셀). 음수 = 창 안(선명), 양수 = 베일
+// 닦인 영역(호 모양 띠)까지의 거리(픽셀). 음수 = 닦인 영역 안(선명), 양수 = 베일
 float windowDist(vec2 p) {
-  float W = uRes.x, H = uRes.y;
-  float xn = p.x / W;
-  float yn = p.y / H;            // 위쪽이 0
-  // 위/아래 경계: 레퍼런스처럼 기울어진 곡선 (베일 띠가 위·아래에 남음)
-  float topY = H * (0.17 - 0.135 * xn + 0.035 * xn * xn);
-  float botY = H * (0.95 - 0.04 * xn - 0.11 * xn * xn);
-  // 좌/우 경계: 손을 따라 움직이며, 유리 조각처럼 살짝 휘어진 곡선
-  float bow = H * 0.32 * (yn - 0.5) * (yn - 0.5);
-  float lx = uLR.x * W + bow;
-  float rx = uLR.y * W - bow;
-  float ex = max(lx - p.x, p.x - rx);
-  float ey = max(topY - p.y, p.y - botY);
-  float r = H * 0.10;            // 모서리 둥글기
-  vec2 q = vec2(ex, ey) + r;
-  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  vec2 v = p - uArc.xy;
+  float r = length(v);
+  float th = atan(v.x, -v.y);                    // 회전축에서 본 각도 (0 = 바로 위)
+  float s = clamp((r - uArc.z) / uHalf, -1.0, 1.0);
+  float b = uBulge * (1.0 - s * s) * uOpen;      // 경계 가운데가 볼록하게
+  float da = max((uAng.x - b) - th, th - (uAng.y + b)) * r;
+  float dr = max((uArc.z - uHalf) - r, r - (uArc.z + uHalf));
+  vec2 q = vec2(da, dr) + uCorner;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uCorner;
 }
 
 void main() {
-  vec2 p = vec2(vUv.x * uRes.x, (1.0 - vUv.y) * uRes.y);
+  vec2 p = vec2(vUv.x * uRes.x, (1.0 - vUv.y) * uRes.y);   // 위쪽이 0
   float H = uRes.y;
 
   vec3 sharp = texture(uSrc, srcUv(vUv)).rgb;
   vec3 blur  = texture(uBlur, vUv).rgb;
 
-  // 닦인 창이 없으면 아주 먼 거리로 처리 → 전체가 베일
+  // 닦인 영역이 없으면 아주 먼 거리로 처리 → 전체가 베일
   float d = uOpen > 0.0 ? windowDist(p) : 1e5;
 
   // 베일 마스크: 0 = 선명, 1 = 베일
@@ -126,7 +132,6 @@ void main() {
 
   // Inner Glow: 베일 조각의 테두리 안쪽에서 진하고, 안쪽으로 갈수록 사라짐
   float gWin = exp(-max(d, 0.0) / (H * uGlowWin)) * uOpen;
-  // 화면 네 변 각각의 글로우를 부드럽게 합쳐 모서리에 각진 선이 생기지 않게 함
   float fw = H * uGlowFrame;
   vec4 eg = exp(-vec4(p.x, uRes.x - p.x, p.y, uRes.y - p.y) / fw);
   float gFrame = 1.0 - (1.0 - eg.x) * (1.0 - eg.y) * (1.0 - eg.z) * (1.0 - eg.w);
@@ -171,6 +176,11 @@ function makeTex(gl) {
   return t;
 }
 
+export function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
 export class VeilRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -181,22 +191,25 @@ export class VeilRenderer {
     this.blurProg = program(gl, BLUR_FRAG);
     this.compProg = program(gl, COMP_FRAG);
     this.vao = gl.createVertexArray();
-
-    // 원본 텍스처 (처음엔 옅은 핑크 1픽셀)
     this.srcTex = makeTex(gl);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([246, 214, 222, 255]));
-    this.srcW = 1; this.srcH = 1;
-    this.source = null;
+    this.clearSource();
+    this.setColor('#FF80A0');
+    this.bandHalf = 0.28;  // 닦이는 띠 두께의 절반 (화면 높이 비율) — 크기 슬라이더로 바뀜
 
     this.fbos = [this._makeFbo(), this._makeFbo()];
     this.resize();
   }
 
+  // 베일 컬러 지정 (#RRGGBB)
+  setColor(hex) {
+    const c = hexToRgb(hex);
+    this.glowColor = c;
+    this.washColor = c.map((v) => v + (1 - v) * LOOK.washMix);
+  }
+
   _makeFbo() {
     const gl = this.gl;
-    const tex = makeTex(gl);
-    const fb = gl.createFramebuffer();
-    return { tex, fb, w: 0, h: 0 };
+    return { tex: makeTex(gl), fb: gl.createFramebuffer(), w: 0, h: 0 };
   }
 
   _sizeFbo(f, w, h) {
@@ -217,17 +230,34 @@ export class VeilRenderer {
     this.canvas.height = h;
     const bw = LOOK.blurWidth;
     const bh = Math.max(2, Math.round(bw * h / w));
-    this.fbos.forEach(f => this._sizeFbo(f, bw, bh));
+    this.fbos.forEach((f) => this._sizeFbo(f, bw, bh));
   }
 
   // 영상(video) 또는 이미지(img)를 원본으로 지정
   setSource(el) { this.source = el; }
+
+  // 원본 없음 (홈 화면): 옅은 흰색 바탕 위에 베일 컬러만 보이게
+  clearSource() {
+    const gl = this.gl;
+    this.source = null;
+    gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([246, 242, 244, 255]));
+    this.srcW = 1; this.srcH = 1;
+  }
 
   // 원본을 화면에 꽉 차게(cover) 보여줄 때의 잘림 비율
   coverFactor() {
     const sa = this.canvas.width / this.canvas.height;
     const va = this.srcW / this.srcH;
     return sa > va ? [1, va / sa] : [sa / va, 1];
+  }
+
+  // 화면 가로 위치(0~1) → 회전축 기준 각도
+  xToAngle(x) {
+    const W = this.canvas.width, H = this.canvas.height;
+    const R = LOOK.arcRadius * H;
+    const t = (x * W - LOOK.pivotX * W) / R;
+    return Math.asin(Math.max(-1, Math.min(1, t)));
   }
 
   _uploadSource() {
@@ -252,8 +282,8 @@ export class VeilRenderer {
 
   /**
    * @param {{left:number,right:number,open:number,mirror:boolean}} s
-   *   left/right: 닦인 창 경계 (화면 가로 0~1, 화면 밖 값 허용)
-   *   open: 0이면 닦인 창 없음
+   *   left/right: 닦인 영역 경계 (화면 가로 0~1, 화면 밖 값 허용)
+   *   open: 0이면 닦인 영역 없음
    */
   render(s) {
     const gl = this.gl;
@@ -263,6 +293,7 @@ export class VeilRenderer {
     const cover = this.coverFactor();
     const mirror = s.mirror ? 1 : 0;
     const [A, B] = this.fbos;
+    const W = this.canvas.width, H = this.canvas.height;
 
     // 1) 원본 → 작은 텍스처
     this._pass(this.mapProg, A, A.w, A.h);
@@ -290,21 +321,25 @@ export class VeilRenderer {
 
     // 3) 최종 합성
     const c = this.compProg;
-    this._pass(c, null, this.canvas.width, this.canvas.height);
+    this._pass(c, null, W, H);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
     gl.uniform1i(c.u.uSrc, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, A.tex);
     gl.uniform1i(c.u.uBlur, 1);
-    gl.uniform2f(c.u.uRes, this.canvas.width, this.canvas.height);
+    gl.uniform2f(c.u.uRes, W, H);
     gl.uniform2f(c.u.uCover, cover[0], cover[1]);
     gl.uniform1f(c.u.uMirror, mirror);
-    gl.uniform2f(c.u.uLR, s.left, s.right);
+    gl.uniform2f(c.u.uAng, this.xToAngle(s.left), this.xToAngle(s.right));
+    gl.uniform3f(c.u.uArc, LOOK.pivotX * W, LOOK.pivotY * H, LOOK.arcRadius * H);
+    gl.uniform1f(c.u.uHalf, this.bandHalf * H);
+    gl.uniform1f(c.u.uBulge, LOOK.arcBulge);
+    gl.uniform1f(c.u.uCorner, LOOK.cornerRadius * H);
     gl.uniform1f(c.u.uOpen, s.open);
-    gl.uniform3fv(c.u.uWash, LOOK.washColor);
+    gl.uniform3fv(c.u.uWash, this.washColor);
     gl.uniform1f(c.u.uWashAmt, LOOK.washAmount);
-    gl.uniform3fv(c.u.uGlow, LOOK.glowColor);
+    gl.uniform3fv(c.u.uGlow, this.glowColor);
     gl.uniform1f(c.u.uGlowAmt, LOOK.glowAmount);
     gl.uniform1f(c.u.uGlowWin, LOOK.glowWidthWindow);
     gl.uniform1f(c.u.uGlowFrame, LOOK.glowWidthFrame);

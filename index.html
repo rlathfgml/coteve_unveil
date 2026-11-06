@@ -15,10 +15,10 @@
   <!-- 손 위치를 알려주는 작은 표시 -->
   <div id="hand-dot" class="hand-dot"></div>
 
-  <!-- 시작 화면 -->
+  <!-- 시작(홈) 화면 -->
   <section id="intro" class="overlay">
     <div class="intro-card">
-      <p class="eyebrow">coteve</p>
+      <img class="logo" src="Logo.svg" alt="coteve" />
       <h1>Unveil Your Teeth.<br />Reveal Your Smile.</h1>
       <p class="desc">카메라를 켜고, 손날로 화면을 옆으로 쓸어<br />베일을 걷어내 보세요.</p>
       <button id="start-btn" class="btn primary">체험 시작하기</button>
@@ -38,15 +38,34 @@
       <h2>카메라를 사용할 수 없어요</h2>
       <p id="error-msg" class="desc"></p>
       <button id="retry-btn" class="btn primary">다시 시도하기</button>
+      <button id="error-home-btn" class="btn ghost">처음으로</button>
     </div>
   </section>
 
   <!-- 체험 중 화면 UI -->
   <div id="hud" class="hud hidden">
     <div id="status" class="status"><span class="dot"></span><span id="status-text">손을 화면에 보여 주세요</span></div>
+    <button id="home-btn" class="btn ghost small home-btn">처음으로</button>
     <p id="hint" class="hint">손을 펴고, 손날로 화면을 좌우로 쓸어 주세요</p>
     <p id="done-copy" class="done-copy">Reveal Your Smile.</p>
     <button id="reset-btn" class="btn ghost">다시 체험하기</button>
+  </div>
+
+  <!-- 베일 설정 (컬러 / 닦이는 크기) -->
+  <div id="controls" class="controls">
+    <div class="ctrl-row">
+      <span class="ctrl-label">베일 컬러</span>
+      <div class="swatches" role="radiogroup" aria-label="베일 컬러">
+        <button class="swatch" data-color="#FF80A0" style="--c:#FF80A0" aria-label="분홍색"></button>
+        <button class="swatch" data-color="#AB7EFF" style="--c:#AB7EFF" aria-label="보라색"></button>
+        <button class="swatch" data-color="#80EAFF" style="--c:#80EAFF" aria-label="하늘색"></button>
+        <button class="swatch" data-color="#8EFFC3" style="--c:#8EFFC3" aria-label="민트색"></button>
+      </div>
+    </div>
+    <div id="size-row" class="ctrl-row hidden">
+      <span class="ctrl-label">닦이는 크기</span>
+      <input id="size" type="range" min="0.15" max="0.6" step="0.01" value="0.28" aria-label="닦이는 크기" />
+    </div>
   </div>
 
   <script type="module" src="js/app.js"></script>

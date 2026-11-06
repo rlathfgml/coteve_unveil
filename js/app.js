@@ -1,7 +1,7 @@
 // =============================================================
-// 전체 흐름: 시작 버튼 → 카메라 켜기 → 손 인식 → 베일 그리기
+// 전체 흐름: 홈 화면 → 카메라 켜기 → 손 인식 → 베일 그리기 → (처음으로)
 // =============================================================
-import { VeilRenderer } from './veil-renderer.js';
+import { VeilRenderer, hexToRgb } from './veil-renderer.js';
 import { createHandTracker, handsToScreen } from './hand-tracker.js';
 import { WipeController } from './wipe-controller.js';
 
@@ -12,6 +12,7 @@ const ui = {
   intro: $('intro'), loading: $('loading'), error: $('error'), errorMsg: $('error-msg'),
   hud: $('hud'), status: $('status'), statusText: $('status-text'),
   hint: $('hint'), done: $('done-copy'), dot: $('hand-dot'),
+  sizeRow: $('size-row'), size: $('size'),
 };
 
 // 주소 끝에 ?test 를 붙이면: 카메라 대신 레퍼런스 이미지 + 마우스 드래그로 테스트
@@ -28,9 +29,11 @@ try {
 }
 
 const wipe = new WipeController();
-let tracker = null;
+let tracker = null;      // 한 번 불러온 손 인식 AI는 계속 재사용
+let stream = null;
 let mirror = true;
 let running = false;
+let session = 0;         // '처음으로'를 누르면 진행 중이던 준비 과정을 무시하기 위한 번호
 let lastVideoTime = -1;
 
 // 화면에 보이는 경계는 목표 위치를 부드럽게 따라가요
@@ -39,40 +42,71 @@ const view = { left: 0.5, right: 0.5, open: 0 };
 function show(el, on) { el.classList.toggle('hidden', !on); }
 
 function showError(msg) {
-  show(ui.intro, false); show(ui.loading, false); show(ui.hud, false);
+  show(ui.intro, false); show(ui.loading, false); show(ui.hud, false); show(ui.sizeRow, false);
   ui.errorMsg.textContent = msg;
   show(ui.error, true);
 }
 
+// ---------- 베일 컬러 ----------
+function setColor(hex) {
+  renderer?.setColor(hex);
+  const [r, g, b] = hexToRgb(hex).map((v) => Math.round(v * 255));
+  // 글자 그림자·버튼 글자용 진한 색 (선택 컬러를 어둡게)
+  const deep = [r, g, b].map((v) => Math.round(v * 0.62));
+  const root = document.documentElement.style;
+  root.setProperty('--accent', hex);
+  root.setProperty('--accent-deep', `rgb(${deep.join(',')})`);
+  root.setProperty('--accent-shadow', `rgba(${deep.join(',')},0.5)`);
+  document.querySelectorAll('.swatch').forEach((s) =>
+    s.classList.toggle('selected', s.dataset.color.toLowerCase() === hex.toLowerCase()));
+}
+document.querySelectorAll('.swatch').forEach((s) =>
+  s.addEventListener('click', () => setColor(s.dataset.color)));
+setColor('#FF80A0');
+
+// ---------- 닦이는 크기 ----------
+function setSize(v) { if (renderer) renderer.bandHalf = v; }
+ui.size.addEventListener('input', () => setSize(parseFloat(ui.size.value)));
+setSize(parseFloat(ui.size.value));
+
+// ---------- 시작 ----------
 async function start() {
+  const my = ++session;
   show(ui.intro, false); show(ui.error, false); show(ui.loading, true);
   try {
     if (TEST) {
       const img = new Image();
       img.src = 'cotev_visual.png';
       await img.decode();
+      if (my !== session) return;
       renderer.setSource(img);
       mirror = false;
     } else {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw Object.assign(new Error(), { name: 'NoSupport' });
       }
-      const [stream, t] = await Promise.all([
+      const [s, t] = await Promise.all([
         navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         }),
-        createHandTracker(),
+        tracker ? Promise.resolve(tracker) : createHandTracker(),
       ]);
       tracker = t;
+      if (my !== session) { s.getTracks().forEach((tr) => tr.stop()); return; }
+      stream = s;
       video.srcObject = stream;
       await video.play();
       renderer.setSource(video);
+      mirror = true;
     }
+    resetExperience();
     show(ui.loading, false);
     show(ui.hud, true);
+    show(ui.sizeRow, true);
     running = true;
   } catch (e) {
+    if (my !== session) return;
     console.error(e);
     const messages = {
       NotAllowedError: '카메라 사용이 허용되지 않았어요. 주소창 왼쪽의 자물쇠/카메라 아이콘을 눌러 카메라를 "허용"으로 바꾼 뒤 다시 시도해 주세요.',
@@ -82,6 +116,20 @@ async function start() {
     };
     showError(messages[e.name] || '준비 중 문제가 생겼어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
   }
+}
+
+// ---------- 처음으로 (홈 화면) ----------
+function goHome() {
+  session++;
+  running = false;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } // 카메라 끄기
+  video.pause();
+  video.srcObject = null;
+  renderer?.clearSource();
+  resetExperience();
+  updateHandUi([]);
+  show(ui.hud, false); show(ui.sizeRow, false); show(ui.loading, false); show(ui.error, false);
+  show(ui.intro, true);
 }
 
 function resetExperience() {
@@ -100,7 +148,7 @@ function frame(now) {
   prevT = now;
 
   // 1) 손 인식
-  if (running && tracker && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+  if (running && tracker && stream && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
     const result = tracker.detectForVideo(video, now);
     const hands = handsToScreen(result, renderer.coverFactor(), mirror);
@@ -111,7 +159,7 @@ function frame(now) {
   // 2) 화면 경계를 목표 쪽으로 부드럽게 이동
   if (wipe.started) {
     if (view.open === 0) {
-      // 처음 닦기 시작한 순간: 손 위치에서 창이 열리기 시작
+      // 처음 닦기 시작한 순간: 손 위치에서 열리기 시작
       const mid = (wipe.left + wipe.right) / 2;
       view.left = view.right = mid;
     }
@@ -144,9 +192,12 @@ if (MOUSE) {
     const x = e.clientX / innerWidth, y = e.clientY / innerHeight;
     return [{ minX: x - 0.03, maxX: x + 0.03, cx: x, cy: y, open: true }];
   };
-  canvas.addEventListener('pointerdown', (e) => { down = true; wipe.update(fake(e), performance.now() / 1000); });
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!running) return;
+    down = true; wipe.update(fake(e), performance.now() / 1000);
+  });
   window.addEventListener('pointerup', () => { down = false; wipe.update([], performance.now() / 1000); });
-  window.addEventListener('pointermove', (e) => { if (down) wipe.update(fake(e), performance.now() / 1000); });
+  window.addEventListener('pointermove', (e) => { if (down && running) wipe.update(fake(e), performance.now() / 1000); });
 }
 
 // 테스트용: 개발자 도구에서 window.__veil 로 상태 확인
@@ -155,3 +206,5 @@ window.__veil = { wipe, view };
 $('start-btn').addEventListener('click', start);
 $('retry-btn').addEventListener('click', start);
 $('reset-btn').addEventListener('click', resetExperience);
+$('home-btn').addEventListener('click', goHome);
+$('error-home-btn').addEventListener('click', goHome);
