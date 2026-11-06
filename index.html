@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>coteve — Unveil Your Smile</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 웹캠 영상 + 베일 그래픽이 그려지는 화면 -->
+  <canvas id="stage"></canvas>
+  <video id="cam" playsinline muted></video>
+
+  <!-- 손 위치를 알려주는 작은 표시 -->
+  <div id="hand-dot" class="hand-dot"></div>
+
+  <!-- 시작 화면 -->
+  <section id="intro" class="overlay">
+    <div class="intro-card">
+      <p class="eyebrow">coteve</p>
+      <h1>Unveil Your Teeth.<br />Reveal Your Smile.</h1>
+      <p class="desc">카메라를 켜고, 손날로 화면을 옆으로 쓸어<br />베일을 걷어내 보세요.</p>
+      <button id="start-btn" class="btn primary">체험 시작하기</button>
+      <p class="fine">카메라 영상은 이 기기 안에서만 처리되며, 저장되거나 전송되지 않아요.</p>
+    </div>
+  </section>
+
+  <!-- 준비 중 -->
+  <section id="loading" class="overlay hidden">
+    <div class="spinner"></div>
+    <p>카메라와 손 인식을 준비하고 있어요…</p>
+  </section>
+
+  <!-- 오류 -->
+  <section id="error" class="overlay hidden">
+    <div class="intro-card">
+      <h2>카메라를 사용할 수 없어요</h2>
+      <p id="error-msg" class="desc"></p>
+      <button id="retry-btn" class="btn primary">다시 시도하기</button>
+    </div>
+  </section>
+
+  <!-- 체험 중 화면 UI -->
+  <div id="hud" class="hud hidden">
+    <div id="status" class="status"><span class="dot"></span><span id="status-text">손을 화면에 보여 주세요</span></div>
+    <p id="hint" class="hint">손을 펴고, 손날로 화면을 좌우로 쓸어 주세요</p>
+    <p id="done-copy" class="done-copy">Reveal Your Smile.</p>
+    <button id="reset-btn" class="btn ghost">다시 체험하기</button>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

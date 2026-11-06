@@ -1,0 +1,181 @@
+:root {
+  --pink: #e98aa4;
+  --pink-deep: #d9577d;
+  --ink: #2a1a20;
+  --white: #fff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #f3c7d2;
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+  color: var(--white);
+  -webkit-font-smoothing: antialiased;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+#cam { display: none; }
+
+.hidden { display: none !important; }
+
+/* ---------- 오버레이(시작/로딩/오류) ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+  padding: 24px;
+  z-index: 10;
+}
+
+.intro-card { max-width: 560px; }
+
+.eyebrow {
+  margin: 0 0 14px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(34px, 5vw, 60px);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  text-shadow: 0 2px 30px rgba(200, 60, 100, 0.25);
+}
+
+h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
+
+.desc {
+  margin: 20px 0 30px;
+  font-size: 17px;
+  line-height: 1.6;
+  font-weight: 500;
+  opacity: 0.95;
+}
+
+.fine { margin-top: 22px; font-size: 13px; opacity: 0.8; }
+
+/* ---------- 버튼 ---------- */
+.btn {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  border: 0;
+  border-radius: 999px;
+  padding: 15px 34px;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease, opacity 0.2s ease;
+}
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(1px); }
+
+.btn.primary { background: var(--white); color: var(--pink-deep); box-shadow: 0 8px 30px rgba(190, 60, 100, 0.25); }
+
+.btn.ghost {
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--white);
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.btn.ghost:hover { background: rgba(255, 255, 255, 0.35); }
+
+/* ---------- 로딩 ---------- */
+.spinner {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading p { font-size: 16px; font-weight: 600; margin: 0; }
+
+/* ---------- 체험 중 UI ---------- */
+.hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+.hud .btn, .hud .status { pointer-events: auto; }
+
+.status {
+  position: absolute;
+  top: 22px; left: 22px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 13px; font-weight: 600;
+}
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); }
+.status.on .dot { background: #7cf0a8; box-shadow: 0 0 8px #7cf0a8; }
+
+.hint {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-size: clamp(18px, 2.2vw, 26px);
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow: 0 2px 24px rgba(190, 60, 100, 0.35);
+  transition: opacity 0.6s ease;
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe { 50% { opacity: 0.65; } }
+.hint.gone { opacity: 0 !important; animation: none; }
+
+.done-copy {
+  position: absolute;
+  left: 0; right: 0; top: 2.2vh;
+  margin: 0;
+  text-align: center;
+  font-size: clamp(26px, 3.6vw, 48px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+.done-copy.show { opacity: 1; transform: none; }
+
+#reset-btn {
+  position: absolute;
+  left: 50%; bottom: 4vh;
+  transform: translateX(-50%);
+}
+#reset-btn:hover { transform: translateX(-50%) translateY(-1px); }
+
+/* 손 위치 표시(자국을 남기지 않는 작은 링) */
+.hand-dot {
+  position: fixed;
+  left: 0; top: 0;
+  width: 46px; height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 0.25s ease, width 0.2s ease, height 0.2s ease, margin 0.2s ease;
+}
+.hand-dot.visible { opacity: 0.8; }
+.hand-dot.wiping { width: 60px; height: 60px; margin: -30px 0 0 -30px; opacity: 1; background: rgba(255, 255, 255, 0.15); }
