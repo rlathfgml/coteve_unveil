@@ -1,9 +1,11 @@
 // =============================================================
-// 전체 흐름: 홈 화면 → 카메라 켜기 → 손 인식 → 베일 그리기 → (처음으로)
+// 전체 흐름: 홈 화면 → 카메라 켜기 → 손 인식 → 베일 그리기 → 촬영/저장 → (처음으로)
 // =============================================================
 import { VeilRenderer, hexToRgb } from './veil-renderer.js';
 import { createHandTracker, handsToScreen } from './hand-tracker.js';
 import { WipeController } from './wipe-controller.js';
+import { strokeToArc } from './arc.js';
+import * as cap from './capture.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('stage');
@@ -13,6 +15,8 @@ const ui = {
   hud: $('hud'), status: $('status'), statusText: $('status-text'),
   hint: $('hint'), done: $('done-copy'), dot: $('hand-dot'),
   sizeRow: $('size-row'), size: $('size'),
+  countdown: $('countdown'), flash: $('flash'),
+  shot: $('shot'), shotImg: $('shot-img'), shareBtn: $('share-btn'),
 };
 
 // 주소 끝에 ?test 를 붙이면: 카메라 대신 레퍼런스 이미지 + 마우스 드래그로 테스트
@@ -20,6 +24,7 @@ const ui = {
 const params = new URLSearchParams(location.search);
 const TEST = params.has('test');
 const MOUSE = TEST || params.has('mouse');
+const DONE_RATIO = 0.6; // 화면의 이만큼 닦이면 "Reveal Your Smile." 문구 표시
 
 let renderer;
 try {
@@ -35,9 +40,7 @@ let mirror = true;
 let running = false;
 let session = 0;         // '처음으로'를 누르면 진행 중이던 준비 과정을 무시하기 위한 번호
 let lastVideoTime = -1;
-
-// 화면에 보이는 경계는 목표 위치를 부드럽게 따라가요
-const view = { left: 0.5, right: 0.5, open: 0 };
+let accentDeep = 'rgb(158,79,99)';
 
 function show(el, on) { el.classList.toggle('hidden', !on); }
 
@@ -53,9 +56,10 @@ function setColor(hex) {
   const [r, g, b] = hexToRgb(hex).map((v) => Math.round(v * 255));
   // 글자 그림자·버튼 글자용 진한 색 (선택 컬러를 어둡게)
   const deep = [r, g, b].map((v) => Math.round(v * 0.62));
+  accentDeep = `rgb(${deep.join(',')})`;
   const root = document.documentElement.style;
   root.setProperty('--accent', hex);
-  root.setProperty('--accent-deep', `rgb(${deep.join(',')})`);
+  root.setProperty('--accent-deep', accentDeep);
   root.setProperty('--accent-shadow', `rgba(${deep.join(',')},0.5)`);
   document.querySelectorAll('.swatch').forEach((s) =>
     s.classList.toggle('selected', s.dataset.color.toLowerCase() === hex.toLowerCase()));
@@ -128,24 +132,23 @@ function goHome() {
   renderer?.clearSource();
   resetExperience();
   updateHandUi([]);
+  closeShot();
   show(ui.hud, false); show(ui.sizeRow, false); show(ui.loading, false); show(ui.error, false);
   show(ui.intro, true);
 }
 
 function resetExperience() {
   wipe.reset();
-  view.open = 0;
+  renderer?.clearWipes();
   ui.hint.classList.remove('gone');
   ui.done.classList.remove('show');
 }
 
 // ---------- 매 프레임 ----------
-let prevT = performance.now();
+let lastCoverageCheck = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   if (!renderer) return;
-  const dt = Math.min(0.1, (now - prevT) / 1000);
-  prevT = now;
 
   // 1) 손 인식
   if (running && tracker && stream && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
@@ -156,22 +159,22 @@ function frame(now) {
     updateHandUi(hands);
   }
 
-  // 2) 화면 경계를 목표 쪽으로 부드럽게 이동
-  if (wipe.started) {
-    if (view.open === 0) {
-      // 처음 닦기 시작한 순간: 손 위치에서 열리기 시작
-      const mid = (wipe.left + wipe.right) / 2;
-      view.left = view.right = mid;
-    }
-    const k = 1 - Math.exp(-dt * 10);
-    view.left += (wipe.left - view.left) * k;
-    view.right += (wipe.right - view.right) * k;
-    view.open = Math.min(1, Math.max(0.0001, (view.right - view.left) / 0.08));
-    ui.hint.classList.add('gone');
-    if (wipe.complete) ui.done.classList.add('show');
-  }
+  // 2) 손이 지나간 길 → 호 모양으로 변환
+  const W = canvas.width, H = canvas.height, half = renderer.bandHalf * H;
+  const toArcs = (strokes) => strokes.map((s) => strokeToArc(s, W, H, half)).filter(Boolean);
+  const finished = toArcs(wipe.takeFinished());
+  if (finished.length) renderer.commitArcs(finished);
+  const live = toArcs(wipe.activeStrokes);
 
-  renderer.render({ left: view.left, right: view.right, open: view.open, mirror });
+  if (wipe.started) ui.hint.classList.add('gone');
+
+  renderer.render({ liveArcs: live, mirror });
+
+  // 3) 가끔 닦인 비율 확인
+  if (running && wipe.started && now - lastCoverageCheck > 500) {
+    lastCoverageCheck = now;
+    if (renderer.measureCoverage() > DONE_RATIO) ui.done.classList.add('show');
+  }
 }
 requestAnimationFrame(frame);
 
@@ -185,6 +188,51 @@ function updateHandUi(hands) {
   if (h) ui.dot.style.transform = `translate(${h.cx * innerWidth}px, ${h.cy * innerHeight}px)`;
 }
 
+// ---------- 촬영 ----------
+let shotCanvas = null;   // 촬영 순간의 화면
+let shotFormat = 'feed';
+let composed = null;
+let shooting = false;
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function shoot() {
+  if (shooting || !running) return;
+  shooting = true;
+  ui.hint.classList.add('gone');
+  show(ui.countdown, true);
+  for (const n of [3, 2, 1]) {
+    ui.countdown.innerHTML = `<span>${n}</span>`;
+    await wait(900);
+  }
+  show(ui.countdown, false);
+  shotCanvas = cap.snapshot(canvas);        // 화면(영상 + 베일)만 찍힘, 버튼 등은 안 찍힘
+  ui.flash.classList.remove('go'); void ui.flash.offsetWidth; ui.flash.classList.add('go');
+  await renderShot();
+  show(ui.shareBtn, cap.canShareFiles());
+  show(ui.shot, true);
+  shooting = false;
+}
+
+async function renderShot() {
+  composed = await cap.compose(shotCanvas, shotFormat, accentDeep);
+  ui.shotImg.src = composed.toDataURL('image/jpeg', 0.85);
+}
+
+function closeShot() { show(ui.shot, false); }
+
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', async () => {
+  shotFormat = t.dataset.format;
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('selected', x === t));
+  if (shotCanvas) await renderShot();
+}));
+$('save-btn').addEventListener('click', () => composed && cap.download(composed, shotFormat));
+ui.shareBtn.addEventListener('click', async () => {
+  try { if (composed) await cap.share(composed); } catch (e) { console.warn(e); }
+});
+$('close-shot-btn').addEventListener('click', closeShot);
+$('shoot-btn').addEventListener('click', shoot);
+
 // ---------- 마우스 테스트 모드 ----------
 if (MOUSE) {
   let down = false;
@@ -196,12 +244,12 @@ if (MOUSE) {
     if (!running) return;
     down = true; wipe.update(fake(e), performance.now() / 1000);
   });
-  window.addEventListener('pointerup', () => { down = false; wipe.update([], performance.now() / 1000); });
+  window.addEventListener('pointerup', () => { if (down) wipe.endAll(); down = false; });
   window.addEventListener('pointermove', (e) => { if (down && running) wipe.update(fake(e), performance.now() / 1000); });
 }
 
 // 테스트용: 개발자 도구에서 window.__veil 로 상태 확인
-window.__veil = { wipe, view };
+window.__veil = { wipe, renderer };
 
 $('start-btn').addEventListener('click', start);
 $('retry-btn').addEventListener('click', start);
