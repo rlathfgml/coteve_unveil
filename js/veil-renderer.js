@@ -248,7 +248,7 @@ export class VeilRenderer {
     this.srcTex = makeTex(gl);
     this.clearSource();
     this.setColor('#AB7EFF');
-    this.bandHalf = 0.2;  // 붓 반지름 (화면 높이 비율) — 크기 슬라이더로 바뀜
+    this.bandHalf = 0.13; // 붓 반지름 (화면의 짧은 쪽 대비 비율) — 작을수록 얇게 닦임
 
     this.fbos = [this._makeFbo(), this._makeFbo()];       // 영상 블러
     this.gfbos = [this._makeFbo(), this._makeFbo()];      // 글로우 블러

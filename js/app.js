@@ -13,7 +13,6 @@ const ui = {
   intro: $('intro'), loading: $('loading'), error: $('error'), errorMsg: $('error-msg'),
   hud: $('hud'), status: $('status'), statusText: $('status-text'),
   hint: $('hint'), dot: $('hand-dot'),
-  sizeRow: $('size-row'), size: $('size'),
   countdown: $('countdown'), flash: $('flash'),
   shot: $('shot'), shotImg: $('shot-img'), shareBtn: $('share-btn'),
 };
@@ -45,7 +44,7 @@ let accentDeep = 'rgb(158,79,99)';
 function show(el, on) { el.classList.toggle('hidden', !on); }
 
 function showError(msg) {
-  show(ui.intro, false); show(ui.loading, false); show(ui.hud, false); show(ui.sizeRow, false);
+  show(ui.intro, false); show(ui.loading, false); show(ui.hud, false);
   ui.errorMsg.textContent = msg;
   show(ui.error, true);
 }
@@ -69,9 +68,7 @@ document.querySelectorAll('.swatch').forEach((s) =>
 setColor('#AB7EFF'); // 처음 시작 컬러: 보라색
 
 // ---------- 닦이는 크기 ----------
-function setSize(v) { if (renderer) renderer.bandHalf = v; }
-ui.size.addEventListener('input', () => setSize(parseFloat(ui.size.value)));
-setSize(parseFloat(ui.size.value));
+
 
 // ---------- 시작 ----------
 async function start() {
@@ -107,7 +104,6 @@ async function start() {
     resetExperience();
     show(ui.loading, false);
     show(ui.hud, true);
-    show(ui.sizeRow, true);
     running = true;
   } catch (e) {
     if (my !== session) return;
@@ -135,7 +131,7 @@ function goHome() {
   resetExperience();
   updateHandUi([]);
   closeShot();
-  show(ui.hud, false); show(ui.sizeRow, false); show(ui.loading, false); show(ui.error, false);
+  show(ui.hud, false); show(ui.loading, false); show(ui.error, false);
   show(ui.intro, true);
 }
 
@@ -154,10 +150,11 @@ let lives = []; // { stroke, p, r, settling, age }
 
 function updateBrush(dt) {
   const W = canvas.width, H = canvas.height;
+  const S = Math.min(W, H); // 세로 화면(모바일)에서도 붓이 너무 커지지 않게 짧은 쪽 기준
   // 손바닥 = 넓은 붓(크기 슬라이더), 손가락 = 얇은 붓
   const radius = (mode) => mode === 'finger'
-    ? Math.max(H * 0.025, renderer.bandHalf * H * FINGER_SIZE)
-    : renderer.bandHalf * H;
+    ? Math.max(S * 0.025, renderer.bandHalf * S * FINGER_SIZE)
+    : renderer.bandHalf * S;
   for (const s of wipe.activeStrokes) {
     if (!lives.some((l) => l.stroke === s)) {
       const p0 = s.points[0];
@@ -243,10 +240,16 @@ const shotVideo = $('shot-video');
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function setShootLabel(text) {
+  shootBtn.setAttribute('aria-label', text);
+  shootBtn.title = text;
+}
+
 function setCaptureMode(mode) {
   captureMode = mode;
   document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('selected', b.dataset.mode === mode));
-  shootBtn.textContent = mode === 'photo' ? '사진 찍기' : '영상 녹화';
+  shootBtn.classList.toggle('video-mode', mode === 'video');
+  setShootLabel(mode === 'photo' ? '사진 찍기' : '영상 녹화');
 }
 document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => setCaptureMode(b.dataset.mode)));
 if (!cap.canRecord()) document.querySelector('.mode-btn[data-mode="video"]').classList.add('hidden');
@@ -278,8 +281,8 @@ async function shoot() {
     modeBox.classList.remove('locked');
   } else {
     recorder = cap.startRecording(canvas);
-    shootBtn.textContent = '■ 녹화 끝내기';
     shootBtn.classList.add('recording');
+    setShootLabel('녹화 끝내기');
     show(recBadge, true);
     const t0 = performance.now();
     const tick = () => {
