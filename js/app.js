@@ -212,7 +212,8 @@ function frame(now) {
 
   // 2) 붓으로 칠하기 + 시간이 지나면 흐려지며 다시 덮이기
   updateBrush(dt);
-  if (running) renderer.evolve(dt);
+  // 사진 카운트다운(3·2·1) 동안은 베일이 다시 덮이지 않게 잠시 멈춤 → 닦은 모습 그대로 찍힘
+  if (running && !(shooting && captureMode === 'photo')) renderer.evolve(dt);
 
   if (wipe.started) ui.hint.classList.add('gone');
 
