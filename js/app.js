@@ -63,8 +63,17 @@ function setColor(hex) {
   document.querySelectorAll('.swatch').forEach((s) =>
     s.classList.toggle('selected', s.dataset.color.toLowerCase() === hex.toLowerCase()));
 }
+// 컬러 선택 창: 평소엔 지금 컬러 원 하나, 누르면 펼쳐지고 고르면 닫힘
+const colorPop = $('color-pop'), colorBtn = $('color-btn');
+function toggleColors(open) {
+  const on = open ?? colorPop.classList.contains('hidden');
+  show(colorPop, on);
+  colorBtn.setAttribute('aria-expanded', String(on));
+}
+colorBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleColors(); });
 document.querySelectorAll('.swatch').forEach((s) =>
-  s.addEventListener('click', () => setColor(s.dataset.color)));
+  s.addEventListener('click', (e) => { e.stopPropagation(); setColor(s.dataset.color); toggleColors(false); }));
+document.addEventListener('click', (e) => { if (!$('color-picker').contains(e.target)) toggleColors(false); });
 setColor('#AB7EFF'); // 처음 시작 컬러: 보라색
 
 // ---------- 닦이는 크기 ----------
@@ -123,6 +132,7 @@ function goHome() {
   session++;
   running = false;
   stopRecording(true); // 녹화 중이었다면 저장하지 않고 끝냄
+  toggleColors(false);
   show(ui.countdown, false);
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } // 카메라 끄기
   video.pause();
